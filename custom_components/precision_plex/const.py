@@ -19,10 +19,11 @@ CONTROL_CHARACTERISTIC_UUID = "03726f62-6f74-7061-6a61-6d61732e6361"
 
 STATUS_READ_CHARACTERISTIC_UUID = "02726f62-6f74-7061-6a61-6d61732e6361"
 
-# State notifications for awning light updates while connected.
+# Awning light state characteristic.
+# Supports READ and NOTIFY.
 # Observed values:
-#   10 00 ... = OFF
-#   11 00 ... = ON
+#   10 00 ... 4d = OFF
+#   11 00 ... 4c = ON
 AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID = (
     "02bb6f62-6f74-7061-6a61-6d61732e6361"
 )

@@ -34,6 +34,9 @@ WRITE_TIMEOUT = 3.0
 ON_SEQUENCE_DELAY = 0.5
 NOTIFY_WINDOW_SECONDS = 30.0
 
+POLL_START_DELAY_SECONDS = 120.0
+POLL_INTERVAL_SECONDS = 300.0
+
 BLE_EXCEPTIONS = (
     BleakError,
     asyncio.TimeoutError,
@@ -72,7 +75,15 @@ class PrecisionPlexAwningLight(LightEntity):
         self._client: BleakClientWithServiceCache | None = None
         self._lock = asyncio.Lock()
         self._disconnect_task: asyncio.Task | None = None
+        self._poll_task: asyncio.Task | None = None
+        self._poll_starter_task: asyncio.Task | None = None
         self._notify_started = False
+
+    async def async_added_to_hass(self) -> None:
+        """Start periodic state polling after startup settles."""
+        self._poll_starter_task = self.hass.async_create_task(
+            self._async_start_polling_after_delay()
+        )
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -112,10 +123,18 @@ class PrecisionPlexAwningLight(LightEntity):
         self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
-        """Disconnect when entity is removed."""
-        if self._disconnect_task is not None:
-            self._disconnect_task.cancel()
-            self._disconnect_task = None
+        """Disconnect and stop polling when entity is removed."""
+        for task in (
+            self._poll_starter_task,
+            self._poll_task,
+            self._disconnect_task,
+        ):
+            if task is not None:
+                task.cancel()
+
+        self._poll_starter_task = None
+        self._poll_task = None
+        self._disconnect_task = None
 
         await self._async_disconnect()
 
@@ -130,32 +149,84 @@ class PrecisionPlexAwningLight(LightEntity):
 
     def _notification_handler(self, sender: int, data: bytearray) -> None:
         """Handle Precision Plex awning light state notifications."""
-        raw = bytes(data)
+        self._apply_state_packet(bytes(data), "notification")
 
+    def _apply_state_packet(self, raw: bytes, source: str) -> None:
+        """Decode and apply an awning light state packet."""
         if len(raw) < 1:
             return
 
         # Observed on characteristic 02bb:
         #   10 00 ... 4d = OFF
         #   11 00 ... 4c = ON
-        new_state = bool(raw[0] & 0x01)
-
-        if new_state == self._attr_is_on:
-            return
+        is_on = bool(raw[0] & 0x01)
 
         _LOGGER.debug(
-            "Precision Plex wall-switch state update data=%s is_on=%s",
+            "Precision Plex 02bb %s data=%s decoded is_on=%s",
+            source,
             raw.hex(" "),
-            new_state,
+            is_on,
         )
 
-        self._attr_is_on = new_state
+        if is_on == self._attr_is_on:
+            self._attr_available = True
+            return
+
+        self._attr_is_on = is_on
         self._attr_available = True
         self.hass.loop.call_soon_threadsafe(self.async_write_ha_state)
 
-    async def _async_get_client(self) -> BleakClientWithServiceCache:
-        """Create a BLE client for this command."""
+    async def _async_start_polling_after_delay(self) -> None:
+        """Delay polling startup so Home Assistant can finish loading."""
+        try:
+            await asyncio.sleep(POLL_START_DELAY_SECONDS)
+
+            if self._poll_task is None or self._poll_task.done():
+                self._poll_task = self.hass.async_create_task(self._async_poll_loop())
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            _LOGGER.debug("Precision Plex failed to start polling: %s", err)
+
+    async def _async_poll_loop(self) -> None:
+        """Periodically read awning state without keeping BLE connected."""
+        while True:
+            try:
+                await self._async_poll_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                _LOGGER.debug("Precision Plex poll failed: %s", err)
+
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+    async def _async_poll_once(self) -> None:
+        """Connect, read current awning state, then disconnect."""
+        async with self._lock:
+            created_connection = not (
+                self._client is not None and self._client.is_connected
+            )
+
+            try:
+                client = await self._async_get_client(start_notify=False)
+                await self._async_read_awning_state(client, "poll")
+
+            except BLE_EXCEPTIONS as err:
+                _LOGGER.debug("Precision Plex poll read failed: %s", err)
+
+            finally:
+                if created_connection:
+                    await self._async_disconnect()
+
+    async def _async_get_client(
+        self,
+        start_notify: bool = True,
+    ) -> BleakClientWithServiceCache:
+        """Create a BLE client for this command or poll."""
         if self._client is not None and self._client.is_connected:
+            if start_notify:
+                await self._async_start_notify(self._client)
             return self._client
 
         ble_device = bluetooth.async_ble_device_from_address(
@@ -178,7 +249,10 @@ class PrecisionPlexAwningLight(LightEntity):
 
         await asyncio.sleep(0.25)
         await self._async_prime_session(self._client)
-        await self._async_start_notify(self._client)
+        await self._async_read_awning_state(self._client, "connect")
+
+        if start_notify:
+            await self._async_start_notify(self._client)
 
         return self._client
 
@@ -204,6 +278,30 @@ class PrecisionPlexAwningLight(LightEntity):
         )
 
         await asyncio.sleep(0.25)
+
+    async def _async_read_awning_state(
+        self,
+        client: BleakClientWithServiceCache,
+        source: str,
+    ) -> None:
+        """Read current awning light state from 02bb."""
+        state_char = client.services.get_characteristic(
+            AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID
+        )
+
+        if state_char is None:
+            _LOGGER.warning(
+                "Precision Plex state read characteristic not found: %s",
+                AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID,
+            )
+            return
+
+        data = await asyncio.wait_for(
+            client.read_gatt_char(state_char),
+            timeout=WRITE_TIMEOUT,
+        )
+
+        self._apply_state_packet(bytes(data), source)
 
     async def _async_start_notify(
         self,
@@ -240,7 +338,7 @@ class PrecisionPlexAwningLight(LightEntity):
         """Write one or more Precision Plex commands, then listen briefly."""
         async with self._lock:
             try:
-                client = await self._async_get_client()
+                client = await self._async_get_client(start_notify=True)
 
                 control_char = client.services.get_characteristic(
                     CONTROL_CHARACTERISTIC_UUID
