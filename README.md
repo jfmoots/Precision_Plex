@@ -1,50 +1,47 @@
 # Precision Plex Home Assistant Integration
 
-Version 1.0 custom Home Assistant integration for controlling a Precision Plex BLE RV awning light.
+Custom Home Assistant integration for controlling a Precision Plex BLE RV controller.
 
-## Version 1.0 status
+## Version 1.1.0
 
-Working:
+### Features
 
-- Home Assistant ON turns the physical awning light ON.
-- Home Assistant OFF turns the physical awning light OFF.
-- Uses a bonded/trusted BLE connection.
-- Uses the required OFF → ON sequence for ON commands.
-- Normal routine BLE logs are at debug level to avoid log spam.
+- Bluetooth config flow for Home Assistant UI setup
+- Bluetooth discovery of Precision Plex devices
+- Friendly device naming, for example `Precision - D244B4 (80:4B:50:D2:44:B4)`
+- Stable awning light ON/OFF control
+- Uses the discovered or selected Bluetooth address from the config entry
+- Minimal normal-operation logging
 
-Known limitation:
+### Known limitations
 
-- Changes made from the physical Precision Plex wall panel do not update Home Assistant state yet.
+- Wall-panel state changes are not currently reflected in Home Assistant.
+- The Home Assistant UI state reflects commands sent from Home Assistant.
+- The Precision Plex controller must already be paired, bonded, and trusted with the Home Assistant host.
 
 ## Installation
 
-Copy this folder into Home Assistant as:
+Copy the integration folder into Home Assistant:
 
 ```text
 /config/custom_components/precision_plex/
 ```
 
-Then restart Home Assistant.
+Restart Home Assistant.
 
-## Bluetooth pairing requirement
-
-The Precision Plex device must be paired, bonded, and trusted with the Home Assistant host.
-
-Check with:
-
-```bash
-bluetoothctl info 80:4B:50:D2:44:B4
-```
-
-Expected:
+Then add the integration from:
 
 ```text
-Paired: yes
-Bonded: yes
-Trusted: yes
+Settings → Devices & services → Add integration → Precision Plex
 ```
 
-If pairing is difficult because the Precision Plex pairing window is short, this delayed `bluetoothctl` script was used successfully:
+Select the discovered Precision Plex Bluetooth device.
+
+## Required Bluetooth pairing
+
+Before setup, the Precision Plex controller must be paired and trusted from the Home Assistant host.
+
+A working pairing sequence used during development was:
 
 ```bash
 (
@@ -69,6 +66,30 @@ echo quit
 ) | bluetoothctl
 ```
 
-## Notes
+Run this immediately after pressing **Pair with Mobile** on the Precision Plex controller.
 
-The ON command intentionally sends OFF first, waits 0.5 seconds, then sends ON. This matches the behavior needed for the physical light to respond reliably.
+Verify that Bluetooth shows:
+
+```text
+Paired: yes
+Bonded: yes
+Trusted: yes
+```
+
+## Behavior
+
+Home Assistant ON sends an OFF command followed by an ON command in one bonded BLE session. This matches the working behavior discovered during reverse engineering.
+
+Home Assistant OFF sends the OFF command.
+
+## Repository layout
+
+```text
+custom_components/
+└── precision_plex/
+    ├── __init__.py
+    ├── config_flow.py
+    ├── const.py
+    ├── light.py
+    └── manifest.json
+```
