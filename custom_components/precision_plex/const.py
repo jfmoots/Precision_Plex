@@ -5,7 +5,7 @@ from homeassistant.const import CONF_ADDRESS
 DOMAIN = "precision_plex"
 DEFAULT_NAME = "Precision Plex"
 
-PLATFORMS = ["light"]
+PLATFORMS = ["light", "switch"]
 
 DEFAULT_TARGET_ADDRESS = "80:4B:50:D2:44:B4"
 
@@ -36,7 +36,12 @@ AWNING_LIGHT_OFF = bytes.fromhex(
     "55 1D 10 0B 00 00 00 00 00 00 00 00 00 00 00 73"
 )
 
+WATER_PUMP_TOGGLE = bytes.fromhex(
+    "55 1D 10 0B 00 07 00 00 00 00 00 00 00 00 00 6C"
+)
+
 HEX_PAYLOADS = {
     "awning_light_on": AWNING_LIGHT_ON,
     "awning_light_off": AWNING_LIGHT_OFF,
+    "water_pump_toggle": WATER_PUMP_TOGGLE,
 }

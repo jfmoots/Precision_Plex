@@ -17,6 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.start import async_at_started
 
 from .const import (
     AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID,
@@ -80,10 +81,19 @@ class PrecisionPlexAwningLight(LightEntity):
         self._notify_started = False
 
     async def async_added_to_hass(self) -> None:
-        """Start periodic state polling after startup settles."""
-        self._poll_starter_task = self.hass.async_create_task(
-            self._async_start_polling_after_delay()
-        )
+        """Register polling startup after Home Assistant has fully started."""
+        async_at_started(self.hass, self._handle_homeassistant_started)
+
+    def _handle_homeassistant_started(self, hass: HomeAssistant) -> None:
+        """Start periodic state polling after Home Assistant startup completes."""
+        self.hass.loop.call_soon_threadsafe(self._schedule_polling_start)
+
+    def _schedule_polling_start(self) -> None:
+        """Schedule polling startup from the Home Assistant event loop."""
+        if self._poll_starter_task is None or self._poll_starter_task.done():
+            self._poll_starter_task = self.hass.async_create_task(
+                self._async_start_polling_after_delay()
+            )
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -177,7 +187,7 @@ class PrecisionPlexAwningLight(LightEntity):
         self.hass.loop.call_soon_threadsafe(self.async_write_ha_state)
 
     async def _async_start_polling_after_delay(self) -> None:
-        """Delay polling startup so Home Assistant can finish loading."""
+        """Delay polling startup after Home Assistant has fully started."""
         try:
             await asyncio.sleep(POLL_START_DELAY_SECONDS)
 
@@ -210,6 +220,7 @@ class PrecisionPlexAwningLight(LightEntity):
 
             try:
                 client = await self._async_get_client(start_notify=False)
+                await asyncio.sleep(0.25)
                 await self._async_read_awning_state(client, "poll")
 
             except BLE_EXCEPTIONS as err:
