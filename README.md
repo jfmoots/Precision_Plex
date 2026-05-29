@@ -1,4 +1,4 @@
-# Precision Plex Home Assistant Integration v1.3.0
+# Precision Plex Home Assistant Integration v1.4.0
 
 A custom Home Assistant integration for controlling a Precision Plex BLE controller.
 
@@ -8,14 +8,15 @@ A custom Home Assistant integration for controlling a Precision Plex BLE control
 - Bluetooth auto-discovery with friendly device naming
 - Pairing guidance for unbonded devices during setup
 - Clean logging during normal operation
-- Startup BLE warm-up to reduce delay on first light command
+- Immediate BLE disconnect after commands so iPhone/mobile apps can connect freely
 
 ## Known Limitations
 
+- First command can take several seconds because the BLE session is opened on demand.
 - Wall-panel state changes are not currently reflected in Home Assistant.
 - Home Assistant remains the authoritative state source for the awning light entity.
 - Only the awning light is currently implemented.
 
 ## Notes
 
-This integration requires the Precision Plex controller to be paired, bonded, and trusted by the Home Assistant host.
+This release intentionally avoids persistent BLE keepalive so the Precision Plex mobile app can connect when needed.

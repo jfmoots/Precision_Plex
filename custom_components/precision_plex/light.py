@@ -31,9 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT = 20.0
 WRITE_TIMEOUT = 3.0
-KEEPALIVE_SECONDS = 60.0
 ON_SEQUENCE_DELAY = 0.5
-WARMUP_DELAY = 15.0
 
 BLE_EXCEPTIONS = (
     BleakError,
@@ -72,12 +70,6 @@ class PrecisionPlexAwningLight(LightEntity):
 
         self._client: BleakClientWithServiceCache | None = None
         self._lock = asyncio.Lock()
-        self._last_used: float = 0.0
-        self._warmup_task: asyncio.Task | None = None
-
-    async def async_added_to_hass(self) -> None:
-        """Warm the BLE connection shortly after startup."""
-        self._warmup_task = self.hass.async_create_task(self._async_warmup_later())
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -118,10 +110,6 @@ class PrecisionPlexAwningLight(LightEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Disconnect when entity is removed."""
-        if self._warmup_task is not None:
-            self._warmup_task.cancel()
-            self._warmup_task = None
-
         await self._async_disconnect()
 
     def _disconnected_callback(
@@ -132,25 +120,8 @@ class PrecisionPlexAwningLight(LightEntity):
         _LOGGER.debug("Precision Plex BLE client disconnected: %s", self._address)
         self._client = None
 
-    async def _async_warmup_later(self) -> None:
-        """Prime BLE services after startup so first command is faster."""
-        try:
-            await asyncio.sleep(WARMUP_DELAY)
-
-            async with self._lock:
-                await self._async_get_client()
-                self._last_used = asyncio.get_running_loop().time()
-                self.hass.async_create_task(self._async_disconnect_later())
-
-            _LOGGER.debug("Precision Plex BLE warmup completed")
-
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:
-            _LOGGER.debug("Precision Plex BLE warmup skipped: %s", err)
-
     async def _async_get_client(self) -> BleakClientWithServiceCache:
-        """Get or create a persistent BLE client."""
+        """Create a BLE client for this command."""
         if self._client is not None and self._client.is_connected:
             return self._client
 
@@ -231,7 +202,7 @@ class PrecisionPlexAwningLight(LightEntity):
         )
 
     async def _async_write_payload_sequence(self, payloads: list[bytes]) -> None:
-        """Write one or more Precision Plex commands in the same BLE session."""
+        """Write one or more Precision Plex commands, then disconnect."""
         async with self._lock:
             try:
                 client = await self._async_get_client()
@@ -279,8 +250,7 @@ class PrecisionPlexAwningLight(LightEntity):
                     if index < len(payloads):
                         await asyncio.sleep(ON_SEQUENCE_DELAY)
 
-                self._last_used = asyncio.get_running_loop().time()
-                self.hass.async_create_task(self._async_disconnect_later())
+                await self._async_disconnect()
 
             except BLE_EXCEPTIONS as err:
                 self._attr_available = False
@@ -293,19 +263,8 @@ class PrecisionPlexAwningLight(LightEntity):
                     f"Failed to write Precision Plex BLE command: {err!r}"
                 ) from err
 
-    async def _async_disconnect_later(self) -> None:
-        """Disconnect after the keepalive window if unused."""
-        await asyncio.sleep(KEEPALIVE_SECONDS)
-
-        if (
-            self._client is not None
-            and self._client.is_connected
-            and asyncio.get_running_loop().time() - self._last_used >= KEEPALIVE_SECONDS
-        ):
-            await self._async_disconnect()
-
     async def _async_disconnect(self) -> None:
-        """Disconnect the persistent BLE client."""
+        """Disconnect the BLE client."""
         client = self._client
         self._client = None
 
