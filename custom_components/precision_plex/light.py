@@ -19,12 +19,12 @@ from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID,
     CONTROL_CHARACTERISTIC_UUID,
     DOMAIN,
     HEX_PAYLOADS,
     PAIRING_CHARACTERISTIC_UUID,
     PAIRING_INIT_PAYLOAD,
-    STATUS_READ_CHARACTERISTIC_UUID,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 20.0
 WRITE_TIMEOUT = 3.0
 ON_SEQUENCE_DELAY = 0.5
+NOTIFY_WINDOW_SECONDS = 30.0
 
 BLE_EXCEPTIONS = (
     BleakError,
@@ -70,6 +71,8 @@ class PrecisionPlexAwningLight(LightEntity):
 
         self._client: BleakClientWithServiceCache | None = None
         self._lock = asyncio.Lock()
+        self._disconnect_task: asyncio.Task | None = None
+        self._notify_started = False
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -110,6 +113,10 @@ class PrecisionPlexAwningLight(LightEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Disconnect when entity is removed."""
+        if self._disconnect_task is not None:
+            self._disconnect_task.cancel()
+            self._disconnect_task = None
+
         await self._async_disconnect()
 
     def _disconnected_callback(
@@ -119,6 +126,32 @@ class PrecisionPlexAwningLight(LightEntity):
         """Handle BLE client disconnect."""
         _LOGGER.debug("Precision Plex BLE client disconnected: %s", self._address)
         self._client = None
+        self._notify_started = False
+
+    def _notification_handler(self, sender: int, data: bytearray) -> None:
+        """Handle Precision Plex awning light state notifications."""
+        raw = bytes(data)
+
+        if len(raw) < 1:
+            return
+
+        # Observed on characteristic 02bb:
+        #   10 00 ... 4d = OFF
+        #   11 00 ... 4c = ON
+        new_state = bool(raw[0] & 0x01)
+
+        if new_state == self._attr_is_on:
+            return
+
+        _LOGGER.debug(
+            "Precision Plex wall-switch state update data=%s is_on=%s",
+            raw.hex(" "),
+            new_state,
+        )
+
+        self._attr_is_on = new_state
+        self._attr_available = True
+        self.hass.loop.call_soon_threadsafe(self.async_write_ha_state)
 
     async def _async_get_client(self) -> BleakClientWithServiceCache:
         """Create a BLE client for this command."""
@@ -134,8 +167,6 @@ class PrecisionPlexAwningLight(LightEntity):
         if ble_device is None:
             raise BleakError(f"Precision Plex device {self._address} is not reachable")
 
-        _LOGGER.debug("Connecting to Precision Plex %s", self._address)
-
         self._client = await establish_connection(
             BleakClientWithServiceCache,
             ble_device,
@@ -147,6 +178,7 @@ class PrecisionPlexAwningLight(LightEntity):
 
         await asyncio.sleep(0.25)
         await self._async_prime_session(self._client)
+        await self._async_start_notify(self._client)
 
         return self._client
 
@@ -154,20 +186,13 @@ class PrecisionPlexAwningLight(LightEntity):
         self,
         client: BleakClientWithServiceCache,
     ) -> None:
-        """Prime the bonded BLE session without notify setup."""
+        """Prime the bonded BLE session."""
         init_char = client.services.get_characteristic(PAIRING_CHARACTERISTIC_UUID)
 
         if init_char is None:
             raise BleakError(
                 f"Init characteristic {PAIRING_CHARACTERISTIC_UUID} not found"
             )
-
-        _LOGGER.debug(
-            "Writing Precision Plex init uuid=%s handle=0x%04X payload=%s",
-            init_char.uuid,
-            init_char.handle,
-            PAIRING_INIT_PAYLOAD.hex(" "),
-        )
 
         await asyncio.wait_for(
             client.write_gatt_char(
@@ -180,29 +205,39 @@ class PrecisionPlexAwningLight(LightEntity):
 
         await asyncio.sleep(0.25)
 
-        status_char = client.services.get_characteristic(STATUS_READ_CHARACTERISTIC_UUID)
+    async def _async_start_notify(
+        self,
+        client: BleakClientWithServiceCache,
+    ) -> None:
+        """Start awning light state notifications."""
+        if self._notify_started:
+            return
 
-        if status_char is None:
-            _LOGGER.debug(
-                "Precision Plex status characteristic not found: %s",
-                STATUS_READ_CHARACTERISTIC_UUID,
+        notify_char = client.services.get_characteristic(
+            AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID
+        )
+
+        if notify_char is None:
+            _LOGGER.warning(
+                "Precision Plex state notify characteristic not found: %s",
+                AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID,
             )
             return
 
-        data = await asyncio.wait_for(
-            client.read_gatt_char(status_char),
+        await asyncio.wait_for(
+            client.start_notify(notify_char, self._notification_handler),
             timeout=WRITE_TIMEOUT,
         )
 
+        self._notify_started = True
         _LOGGER.debug(
-            "Precision Plex status read uuid=%s handle=0x%04X data=%s",
-            status_char.uuid,
-            status_char.handle,
-            bytes(data).hex(" "),
+            "Precision Plex state notifications started uuid=%s handle=0x%04X",
+            notify_char.uuid,
+            notify_char.handle,
         )
 
     async def _async_write_payload_sequence(self, payloads: list[bytes]) -> None:
-        """Write one or more Precision Plex commands, then disconnect."""
+        """Write one or more Precision Plex commands, then listen briefly."""
         async with self._lock:
             try:
                 client = await self._async_get_client()
@@ -212,22 +247,9 @@ class PrecisionPlexAwningLight(LightEntity):
                 )
 
                 if control_char is None:
-                    available = [
-                        f"0x{characteristic.handle:04X} "
-                        f"{characteristic.uuid} "
-                        f"{characteristic.properties}"
-                        for service in client.services
-                        for characteristic in service.characteristics
-                    ]
                     raise BleakError(
-                        f"Control characteristic {CONTROL_CHARACTERISTIC_UUID} "
-                        f"not found. Available characteristics: {available}"
+                        f"Control characteristic {CONTROL_CHARACTERISTIC_UUID} not found"
                     )
-
-                _LOGGER.debug(
-                    "Sending Precision Plex command sequence count=%s",
-                    len(payloads),
-                )
 
                 for index, payload in enumerate(payloads, start=1):
                     await asyncio.wait_for(
@@ -239,22 +261,15 @@ class PrecisionPlexAwningLight(LightEntity):
                         timeout=WRITE_TIMEOUT,
                     )
 
-                    _LOGGER.debug(
-                        "Precision Plex command write completed %s/%s uuid=%s handle=0x%04X",
-                        index,
-                        len(payloads),
-                        control_char.uuid,
-                        control_char.handle,
-                    )
-
                     if index < len(payloads):
                         await asyncio.sleep(ON_SEQUENCE_DELAY)
 
-                await self._async_disconnect()
+                self._schedule_disconnect()
 
             except BLE_EXCEPTIONS as err:
                 self._attr_available = False
                 self.async_write_ha_state()
+
                 _LOGGER.warning("Precision Plex BLE command failed: %r", err)
 
                 await self._async_disconnect()
@@ -263,15 +278,43 @@ class PrecisionPlexAwningLight(LightEntity):
                     f"Failed to write Precision Plex BLE command: {err!r}"
                 ) from err
 
+    def _schedule_disconnect(self) -> None:
+        """Disconnect after the notification window."""
+        if self._disconnect_task is not None:
+            self._disconnect_task.cancel()
+
+        self._disconnect_task = self.hass.async_create_task(
+            self._async_disconnect_after_notify_window()
+        )
+
+    async def _async_disconnect_after_notify_window(self) -> None:
+        """Disconnect after listening for wall-switch changes."""
+        try:
+            await asyncio.sleep(NOTIFY_WINDOW_SECONDS)
+            await self._async_disconnect()
+        except asyncio.CancelledError:
+            raise
+
     async def _async_disconnect(self) -> None:
         """Disconnect the BLE client."""
         client = self._client
         self._client = None
+        self._notify_started = False
 
         if client is not None and client.is_connected:
             try:
-                _LOGGER.debug("Disconnecting Precision Plex BLE client")
+                notify_char = client.services.get_characteristic(
+                    AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID
+                )
+
+                if notify_char is not None:
+                    try:
+                        await client.stop_notify(notify_char)
+                    except BLE_EXCEPTIONS:
+                        pass
+
                 await client.disconnect()
+
             except BLE_EXCEPTIONS as err:
                 _LOGGER.debug(
                     "Error disconnecting from Precision Plex %s: %s",

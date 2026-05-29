@@ -19,6 +19,14 @@ CONTROL_CHARACTERISTIC_UUID = "03726f62-6f74-7061-6a61-6d61732e6361"
 
 STATUS_READ_CHARACTERISTIC_UUID = "02726f62-6f74-7061-6a61-6d61732e6361"
 
+# State notifications for awning light updates while connected.
+# Observed values:
+#   10 00 ... = OFF
+#   11 00 ... = ON
+AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID = (
+    "02bb6f62-6f74-7061-6a61-6d61732e6361"
+)
+
 AWNING_LIGHT_ON = bytes.fromhex(
     "55 1D 10 0B 00 3F 00 00 00 00 00 00 00 00 00 34"
 )
