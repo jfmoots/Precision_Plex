@@ -19,7 +19,6 @@ from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID,
     CONTROL_CHARACTERISTIC_UUID,
     DOMAIN,
     HEX_PAYLOADS,
@@ -34,6 +33,8 @@ WRITE_TIMEOUT = 8.0
 POST_TOGGLE_SETTLE_SECONDS = 2.0
 PRE_CONNECT_SETTLE_SECONDS = 1.0
 
+WATER_PUMP_STATE_BIT = 0x80
+
 BLE_EXCEPTIONS = (
     BleakError,
     asyncio.TimeoutError,
@@ -41,8 +42,6 @@ BLE_EXCEPTIONS = (
     EOFError,
     AssertionError,
 )
-
-WATER_PUMP_STATE_BIT = 0x80
 
 
 async def async_setup_entry(
@@ -96,18 +95,6 @@ class PrecisionPlexWaterPumpSwitch(SwitchEntity):
         """Turn the water pump off."""
         await self._async_set_target_state(False)
 
-    async def async_will_remove_from_hass(self) -> None:
-        """Disconnect when entity is removed."""
-        await self._async_disconnect()
-
-    def _disconnected_callback(
-        self,
-        client: BleakClientWithServiceCache,
-    ) -> None:
-        """Handle BLE client disconnect."""
-        _LOGGER.debug("Precision Plex water pump BLE disconnected: %s", self._address)
-        self._client = None
-
     async def _async_set_target_state(self, target_on: bool) -> None:
         """Toggle water pump if needed, then read state."""
         async with self._lock:
@@ -117,7 +104,8 @@ class PrecisionPlexWaterPumpSwitch(SwitchEntity):
 
                 client = await self._async_get_client()
 
-                current_on = await self._async_read_state_packet(client, "before_toggle")
+                # Read state before toggling
+                current_on = await self._async_read_state(client)
 
                 if current_on is target_on:
                     self._attr_is_on = current_on
@@ -129,7 +117,9 @@ class PrecisionPlexWaterPumpSwitch(SwitchEntity):
                 control_char = client.services.get_characteristic(CONTROL_CHARACTERISTIC_UUID)
 
                 if control_char is None:
-                    raise BleakError(f"Control characteristic {CONTROL_CHARACTERISTIC_UUID} not found")
+                    raise BleakError(
+                        f"Control characteristic {CONTROL_CHARACTERISTIC_UUID} not found"
+                    )
 
                 payload = HEX_PAYLOADS["water_pump_toggle"]
 
@@ -146,13 +136,10 @@ class PrecisionPlexWaterPumpSwitch(SwitchEntity):
 
                 await asyncio.sleep(POST_TOGGLE_SETTLE_SECONDS)
 
-                new_on = await self._async_read_state_packet(client, "after_toggle")
+                # Read state after toggling
+                new_on = await self._async_read_state(client)
 
-                if new_on is not None:
-                    self._attr_is_on = new_on
-                else:
-                    self._attr_is_on = target_on
-
+                self._attr_is_on = new_on if new_on is not None else target_on
                 self._attr_available = True
                 self.async_write_ha_state()
 
@@ -161,21 +148,20 @@ class PrecisionPlexWaterPumpSwitch(SwitchEntity):
             except BLE_EXCEPTIONS as err:
                 self._attr_available = False
                 self.async_write_ha_state()
-
                 _LOGGER.warning("Precision Plex water pump command failed: %r", err)
-
                 await self._async_disconnect()
-
-                raise HomeAssistantError(
-                    f"Failed to write Precision Plex water pump command: {err!r}"
-                ) from err
+                raise HomeAssistantError(f"Failed to write Precision Plex water pump command: {err!r}") from err
 
     async def _async_get_client(self) -> BleakClientWithServiceCache:
         """Create BLE client."""
         if self._client is not None and self._client.is_connected:
             return self._client
 
-        ble_device = bluetooth.async_ble_device_from_address(self.hass, self._address, connectable=True)
+        ble_device = bluetooth.async_ble_device_from_address(
+            self.hass,
+            self._address,
+            connectable=True,
+        )
 
         if ble_device is None:
             raise BleakError(f"Precision Plex device {self._address} is not reachable")
@@ -184,7 +170,6 @@ class PrecisionPlexWaterPumpSwitch(SwitchEntity):
             BleakClientWithServiceCache,
             ble_device,
             self._address,
-            self._disconnected_callback,
             max_attempts=3,
             timeout=CONNECT_TIMEOUT,
         )
@@ -197,44 +182,31 @@ class PrecisionPlexWaterPumpSwitch(SwitchEntity):
     async def _async_prime_session(self, client: BleakClientWithServiceCache) -> None:
         """Prime bonded BLE session."""
         init_char = client.services.get_characteristic(PAIRING_CHARACTERISTIC_UUID)
-        if init_char is None:
-            raise BleakError(f"Init characteristic {PAIRING_CHARACTERISTIC_UUID} not found")
 
-        await asyncio.wait_for(client.write_gatt_char(init_char, PAIRING_INIT_PAYLOAD, response=False),
-                               timeout=WRITE_TIMEOUT)
+        if init_char is None:
+            raise BleakError(
+                f"Init characteristic {PAIRING_CHARACTERISTIC_UUID} not found"
+            )
+
+        await asyncio.wait_for(
+            client.write_gatt_char(init_char, PAIRING_INIT_PAYLOAD, response=False),
+            timeout=WRITE_TIMEOUT,
+        )
+
         await asyncio.sleep(0.25)
 
-    async def _async_read_state_packet(
-        self,
-        client: BleakClientWithServiceCache,
-        source: str,
-    ) -> bool | None:
-        """Read and decode water pump state from 02bb."""
-        state_char = client.services.get_characteristic(AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID)
-
+    async def _async_read_state(self, client: BleakClientWithServiceCache) -> bool | None:
+        """Read water pump state from 02bb."""
+        state_char = client.services.get_characteristic("02bb6f62-6f74-7061-6a61-6d61732e6361")
         if state_char is None:
-            _LOGGER.warning(
-                "Precision Plex water pump state characteristic not found: %s",
-                AWNING_LIGHT_STATE_NOTIFY_CHARACTERISTIC_UUID,
-            )
+            _LOGGER.warning("Precision Plex water pump state characteristic not found")
             return None
 
         data = await asyncio.wait_for(client.read_gatt_char(state_char), timeout=WRITE_TIMEOUT)
-        raw = bytes(data)
-
-        if len(raw) < 1:
+        if len(data) < 1:
             return None
 
-        is_on = bool(raw[0] & WATER_PUMP_STATE_BIT)
-
-        _LOGGER.debug(
-            "Precision Plex water pump %s 02bb data=%s is_on=%s",
-            source,
-            raw.hex(" "),
-            is_on,
-        )
-
-        return is_on
+        return bool(data[0] & WATER_PUMP_STATE_BIT)
 
     async def _async_disconnect(self) -> None:
         """Disconnect BLE client."""

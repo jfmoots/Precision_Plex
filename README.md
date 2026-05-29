@@ -1,38 +1,24 @@
-# Precision Plex Home Assistant Integration v1.7.0
+# Precision Plex Home Assistant Integration
 
-## Features
+## Stable BLE Baseline
+
+This build keeps the verified reliable behavior.
 
 ### Awning Light
-- ON/OFF control from Home Assistant
-- State synchronization using Precision Plex state characteristic (02bb)
-- Notification-based updates after Home Assistant commands
-- Periodic state polling for recovery and resynchronization
-- Wall-switch changes eventually synchronize with Home Assistant
-- Startup-safe polling architecture
+- Home Assistant ON/OFF control
+- State read from the Precision Plex `02bb` state characteristic
+- Short 5-second notification window after Home Assistant commands
+- Periodic polling retained
+- Reduced BLE hold time to avoid Precision Plex wireless module lockups
 
 ### Water Pump
-- ON/OFF control from Home Assistant
-- State-aware operation using Precision Plex state characteristic (02bb)
-- Reads current pump state before sending commands
-- Only sends a toggle when a state change is required
-- Reads and verifies state after command execution
-- Automatic BLE reconnect handling
+- Home Assistant ON/OFF control
+- State-aware toggle behavior
+- Reads current pump state before sending a command
+- Reads and verifies pump state after command execution
+- Uses short-lived BLE sessions
+- No water pump notification window in this stable baseline
 
-### General Features
-- Bluetooth auto-discovery
-- Guided pairing workflow
-- Precision Plex mobile app compatibility
-- Local Bluetooth operation
+## Notes
 
-## Supported Devices
-- Awning Light
-- Water Pump
-
-## Release Notes
-
-### v1.7.0
-- Added Water Pump switch entity
-- Added state-aware water pump control
-- Added automatic BLE reconnect handling
-- Added pre-command state verification
-- Added post-command state verification
+The Precision Plex wireless module appears sensitive to long-lived BLE sessions. This build avoids the previous 30-second notification window and uses a 5-second window for the awning light only.
