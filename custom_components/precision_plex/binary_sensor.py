@@ -1,25 +1,17 @@
-"""Light platform for Precision Plex."""
+"""Binary sensors for Precision Plex read-only monitor."""
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
-from homeassistant.components.light import ColorMode, LightEntity
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
-    AWNING_LIGHT_TAP_SEQUENCE,
-    DOMAIN,
-    STATE_BITS,
-)
+from .const import DOMAIN, STATE_BITS
 from .coordinator import PrecisionPlexStateCoordinator
-
-
-TAP_DELAY_SECONDS = 0.25
 
 
 async def async_setup_entry(
@@ -27,30 +19,46 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Precision Plex light entities."""
+    """Set up Precision Plex binary sensors."""
     coordinator: PrecisionPlexStateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([PrecisionPlexAwningLight(coordinator, entry)])
+    async_add_entities(
+        [
+            PrecisionPlexStateBinarySensor(coordinator, entry, key, description)
+            for key, description in STATE_BITS.items()
+        ]
+    )
 
 
-class PrecisionPlexAwningLight(LightEntity):
-    """Precision Plex awning light control using official app momentary packets."""
+class PrecisionPlexStateBinarySensor(BinarySensorEntity):
+    """Read-only binary sensor decoded from 02BB state bitmap."""
 
     _attr_has_entity_name = True
-    _attr_name = "Awning Light"
-    _attr_supported_color_modes = {ColorMode.ONOFF}
-    _attr_color_mode = ColorMode.ONOFF
 
     def __init__(
         self,
         coordinator: PrecisionPlexStateCoordinator,
         entry: ConfigEntry,
+        key: str,
+        description: dict[str, Any],
     ) -> None:
-        """Initialize the light."""
+        """Initialize sensor."""
         self.coordinator = coordinator
         self.entry = entry
-        self._attr_unique_id = f"{coordinator.address}_awning_light_control"
+        self.key = key
+        self.bit = description["bit"]
+        self.word_index = description.get("word_index", 0)
+        self._attr_name = description["name"]
+        self._attr_unique_id = f"{coordinator.address}_{key}_state"
+
+        device_class = description.get("device_class")
+        if device_class == "light":
+            self._attr_device_class = BinarySensorDeviceClass.LIGHT
+        elif device_class == "moving":
+            self._attr_device_class = BinarySensorDeviceClass.MOVING
+        elif device_class == "power":
+            self._attr_device_class = BinarySensorDeviceClass.POWER
+
         self._remove_listener = None
-        self._command_lock = asyncio.Lock()
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to coordinator updates."""
@@ -71,9 +79,8 @@ class PrecisionPlexAwningLight(LightEntity):
 
     @property
     def is_on(self) -> bool | None:
-        """Return current awning light state from 02BB."""
-        bit = STATE_BITS["awning_light"]["bit"]
-        return self.coordinator.is_bit_on(bit)
+        """Return decoded bit state."""
+        return self.coordinator.is_bit_on(self.bit, self.word_index)
 
     @property
     def available(self) -> bool:
@@ -100,32 +107,11 @@ class PrecisionPlexAwningLight(LightEntity):
                 if self.coordinator.state_word is not None
                 else None
             ),
+            "word_index": self.word_index,
+            "state_words": [f"0x{word:04X}" for word in self.coordinator.state_words],
             "raw_02bb": (
                 self.coordinator.raw_state.hex(" ")
                 if self.coordinator.raw_state is not None
                 else None
             ),
-            "command_mode": "momentary_release_then_press",
-            "command_channel": "03726f62-6f74-7061-6a61-6d61732e6361",
         }
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn on the awning light if it is currently off."""
-        await self._async_set_desired_state(True)
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn off the awning light if it is currently on."""
-        await self._async_set_desired_state(False)
-
-    async def _async_set_desired_state(self, desired_state: bool) -> None:
-        """Toggle the momentary button only when the current state differs."""
-        async with self._command_lock:
-            current_state = self.is_on
-
-            if current_state is desired_state:
-                return
-
-            await self.coordinator.async_write_command_sequence(
-                AWNING_LIGHT_TAP_SEQUENCE,
-                delay_seconds=TAP_DELAY_SECONDS,
-            )

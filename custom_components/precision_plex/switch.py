@@ -1,47 +1,32 @@
-"""Switch platform for Precision Plex water pump."""
+"""Switch platform for Precision Plex."""
 
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any
 
-from bleak import BleakError
-from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
-
-from homeassistant.components import bluetooth
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ADDRESS
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
-    CONTROL_CHARACTERISTIC_UUID,
-    DOMAIN,
-    HEX_PAYLOADS,
-    PAIRING_CHARACTERISTIC_UUID,
-    PAIRING_INIT_PAYLOAD,
-)
+from .const import DOMAIN, STATE_BITS, WATER_PUMP_TAP, WATER_HEATER_TAP
+from .coordinator import PrecisionPlexStateCoordinator
 
-_LOGGER = logging.getLogger(__name__)
 
-CONNECT_TIMEOUT = 20.0
-WRITE_TIMEOUT = 8.0
-POST_TOGGLE_SETTLE_SECONDS = 2.0
-PRE_CONNECT_SETTLE_SECONDS = 1.0
-
-WATER_PUMP_STATE_BIT = 0x80
-
-BLE_EXCEPTIONS = (
-    BleakError,
-    asyncio.TimeoutError,
-    OSError,
-    EOFError,
-    AssertionError,
-)
+SWITCHES = {
+    "water_pump": {
+        "name": "Water Pump",
+        "state_key": "water_pump",
+        "payload": WATER_PUMP_TAP,
+    },
+    "water_heater": {
+        "name": "Water Heater",
+        "state_key": "water_heater",
+        "payload": WATER_HEATER_TAP,
+    },
+}
 
 
 async def async_setup_entry(
@@ -49,176 +34,92 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Precision Plex water pump switch."""
-    async_add_entities([PrecisionPlexWaterPumpSwitch(hass, entry)])
+    """Set up Precision Plex switch entities."""
+    coordinator: PrecisionPlexStateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities(
+        PrecisionPlexToggleSwitch(coordinator, entry, key, cfg)
+        for key, cfg in SWITCHES.items()
+    )
 
 
-class PrecisionPlexWaterPumpSwitch(SwitchEntity):
-    """Precision Plex water pump."""
+class PrecisionPlexToggleSwitch(SwitchEntity):
+    """State-aware toggle switch using Precision app tap packets."""
 
     _attr_has_entity_name = True
-    _attr_name = "Water Pump"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize the water pump switch."""
-        self.hass = hass
+    def __init__(
+        self,
+        coordinator: PrecisionPlexStateCoordinator,
+        entry: ConfigEntry,
+        key: str,
+        cfg: dict[str, Any],
+    ) -> None:
+        self.coordinator = coordinator
         self.entry = entry
-        self._address: str = entry.data[CONF_ADDRESS]
-        self._attr_unique_id = f"{self._address}_water_pump"
-        self._attr_is_on = False
-        self._attr_available = True
+        self.key = key
+        self.cfg = cfg
+        self._attr_name = cfg["name"]
+        self._attr_unique_id = f"{coordinator.address}_{key}_control"
+        self._remove_listener = None
+        self._command_lock = asyncio.Lock()
 
-        self._client: BleakClientWithServiceCache | None = None
-        self._lock = asyncio.Lock()
+    async def async_added_to_hass(self) -> None:
+        self._remove_listener = self.coordinator.async_add_listener(
+            self._handle_coordinator_update
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._remove_listener is not None:
+            self._remove_listener()
+            self._remove_listener = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
 
     @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information."""
-        return {
-            "identifiers": {(DOMAIN, self._address)},
-            "connections": {(CONNECTION_BLUETOOTH, self._address)},
-            "name": self.entry.title,
-            "manufacturer": "Precision Circuits",
-            "model": "Precision Plex BLE RV Control",
-        }
+    def is_on(self) -> bool | None:
+        bit = STATE_BITS[self.cfg["state_key"]]["bit"]
+        return self.coordinator.is_bit_on(bit)
 
     @property
     def available(self) -> bool:
-        """Return availability."""
-        return self._attr_available
+        return self.coordinator.available and self.coordinator.state_word is not None
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
+            "name": self.entry.title,
+            "manufacturer": "Precision Circuits",
+            "model": "Precision Plex Wireless TP Monitor",
+        }
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "state_word": (
+                f"0x{self.coordinator.state_word:04X}"
+                if self.coordinator.state_word is not None
+                else None
+            ),
+            "raw_02bb": (
+                self.coordinator.raw_state.hex(" ")
+                if self.coordinator.raw_state is not None
+                else None
+            ),
+            "command_mode": "state_aware_toggle",
+        }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn the water pump on."""
-        await self._async_set_target_state(True)
+        await self._async_set_desired_state(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn the water pump off."""
-        await self._async_set_target_state(False)
+        await self._async_set_desired_state(False)
 
-    async def _async_set_target_state(self, target_on: bool) -> None:
-        """Toggle water pump if needed, then read state."""
-        async with self._lock:
-            try:
-                await self._async_disconnect()
-                await asyncio.sleep(PRE_CONNECT_SETTLE_SECONDS)
-
-                client = await self._async_get_client()
-
-                # Read state before toggling
-                current_on = await self._async_read_state(client)
-
-                if current_on is target_on:
-                    self._attr_is_on = current_on
-                    self._attr_available = True
-                    self.async_write_ha_state()
-                    await self._async_disconnect()
-                    return
-
-                control_char = client.services.get_characteristic(CONTROL_CHARACTERISTIC_UUID)
-
-                if control_char is None:
-                    raise BleakError(
-                        f"Control characteristic {CONTROL_CHARACTERISTIC_UUID} not found"
-                    )
-
-                payload = HEX_PAYLOADS["water_pump_toggle"]
-
-                _LOGGER.debug(
-                    "Precision Plex water pump toggle payload=%s target_on=%s",
-                    payload.hex(" "),
-                    target_on,
-                )
-
-                await asyncio.wait_for(
-                    client.write_gatt_char(control_char, payload, response=True),
-                    timeout=WRITE_TIMEOUT,
-                )
-
-                await asyncio.sleep(POST_TOGGLE_SETTLE_SECONDS)
-
-                # Read state after toggling
-                new_on = await self._async_read_state(client)
-
-                self._attr_is_on = new_on if new_on is not None else target_on
-                self._attr_available = True
-                self.async_write_ha_state()
-
-                await self._async_disconnect()
-
-            except BLE_EXCEPTIONS as err:
-                self._attr_available = False
-                self.async_write_ha_state()
-                _LOGGER.warning("Precision Plex water pump command failed: %r", err)
-                await self._async_disconnect()
-                raise HomeAssistantError(f"Failed to write Precision Plex water pump command: {err!r}") from err
-
-    async def _async_get_client(self) -> BleakClientWithServiceCache:
-        """Create BLE client."""
-        if self._client is not None and self._client.is_connected:
-            return self._client
-
-        ble_device = bluetooth.async_ble_device_from_address(
-            self.hass,
-            self._address,
-            connectable=True,
-        )
-
-        if ble_device is None:
-            raise BleakError(f"Precision Plex device {self._address} is not reachable")
-
-        self._client = await establish_connection(
-            BleakClientWithServiceCache,
-            ble_device,
-            self._address,
-            max_attempts=3,
-            timeout=CONNECT_TIMEOUT,
-        )
-
-        await asyncio.sleep(0.25)
-        await self._async_prime_session(self._client)
-
-        return self._client
-
-    async def _async_prime_session(self, client: BleakClientWithServiceCache) -> None:
-        """Prime bonded BLE session."""
-        init_char = client.services.get_characteristic(PAIRING_CHARACTERISTIC_UUID)
-
-        if init_char is None:
-            raise BleakError(
-                f"Init characteristic {PAIRING_CHARACTERISTIC_UUID} not found"
-            )
-
-        await asyncio.wait_for(
-            client.write_gatt_char(init_char, PAIRING_INIT_PAYLOAD, response=False),
-            timeout=WRITE_TIMEOUT,
-        )
-
-        await asyncio.sleep(0.25)
-
-    async def _async_read_state(self, client: BleakClientWithServiceCache) -> bool | None:
-        """Read water pump state from 02bb."""
-        state_char = client.services.get_characteristic("02bb6f62-6f74-7061-6a61-6d61732e6361")
-        if state_char is None:
-            _LOGGER.warning("Precision Plex water pump state characteristic not found")
-            return None
-
-        data = await asyncio.wait_for(client.read_gatt_char(state_char), timeout=WRITE_TIMEOUT)
-        if len(data) < 1:
-            return None
-
-        return bool(data[0] & WATER_PUMP_STATE_BIT)
-
-    async def _async_disconnect(self) -> None:
-        """Disconnect BLE client."""
-        client = self._client
-        self._client = None
-
-        if client is not None and client.is_connected:
-            try:
-                await client.disconnect()
-            except BLE_EXCEPTIONS as err:
-                _LOGGER.debug(
-                    "Error disconnecting from Precision Plex water pump %s: %s",
-                    self._address,
-                    err,
-                )
+    async def _async_set_desired_state(self, desired_state: bool) -> None:
+        async with self._command_lock:
+            if self.is_on is desired_state:
+                return
+            await self.coordinator.async_write_command(self.cfg["payload"])
