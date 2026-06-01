@@ -1,5 +1,13 @@
 # Precision Plex Home Assistant Integration
 
+Current Recommended Release:
+
+v2.4.1
+
+Earlier releases are retained for historical and
+
+development reference purposes.
+
 A custom Home Assistant integration for Precision Circuits Precision Plex systems.
 
 ## Project Vision
