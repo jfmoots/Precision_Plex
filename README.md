@@ -1,14 +1,12 @@
 # Precision Plex Home Assistant Integration
 
-Current Recommended Release:
-
-v2.4.1
-
-Earlier releases are retained for historical and
-
-development reference purposes.
-
 A custom Home Assistant integration for Precision Circuits Precision Plex systems.
+
+## Current Recommended Release
+
+**v2.4.2** is the current recommended release.
+
+Earlier releases are retained for historical and development reference. The v1.x releases document the original monitoring/coexistence architecture. The v2.x releases document the transition toward a native Home Assistant replacement for the Precision Circuits Wireless TP application.
 
 ## Project Vision
 
@@ -28,6 +26,24 @@ The current integration is designed to provide:
 - Continuous Bluetooth Low Energy connectivity
 - Reduced dependency on the Precision Circuits Wireless TP mobile application
 
+## Test Environment
+
+This integration has been developed and validated on:
+
+```text
+Precision Circuits Precision Plex
+Precision Circuits Wireless TP Monitor
+
+Primary Development Platform:
+2022 Forest River Georgetown GT5 34M5
+```
+
+The decoded functions, state bits, and command packets currently implemented correspond to equipment installed on that coach.
+
+Precision Plex installations vary by manufacturer, model, year, and option package. Different coaches may expose different slide rooms, lighting zones, HVAC controls, generator controls, water systems, tank monitoring functions, and coach-specific accessories.
+
+The protocol appears to be largely shared across Precision Plex installations, but command mappings and available functions may vary by coach.
+
 ## Important Bluetooth Architecture Note
 
 The Precision Plex Wireless TP module appears to allow only one active BLE connection at a time.
@@ -45,44 +61,9 @@ This is required for:
 
 When Home Assistant is connected, the Precision Circuits iOS application may be unable to connect at the same time. This is expected behavior and is part of the Wireless TP module limitation.
 
-## Architecture Change Since v1.7.x
-
-### Earlier Direction
-
-Earlier builds focused on monitoring state from Precision Plex.
-
-That approach could expose basic status in Home Assistant, but it was limited by:
-
-- Delayed state updates
-- Missed wall-panel transitions
-- No reliable command path
-- No position estimation
-- No true replacement for the Wireless TP application
-
-### Current Direction
-
-The current v2.x direction uses Home Assistant as the primary BLE client and controller.
-
-The integration keeps the BLE connection open and subscribes to live notifications from the Wireless TP module. This lets Home Assistant stay synchronized with both:
-
-- Commands sent from Home Assistant
-- Actions performed on the RV wall panel
-
-Conceptually:
-
-```text
-RV Wall Panel
-    ⇅
-Precision Plex Wireless TP Monitor
-    ⇅
-Home Assistant
-```
-
-This persistent connection is the foundation for bidirectional updates and responsive performance.
-
 ## Current Stable Feature Set
 
-Tested and working as of v2.4.1:
+Tested and working as of v2.4.2:
 
 ### Controls
 
@@ -113,11 +94,7 @@ Travel times are exposed as Home Assistant Number entities:
 
 These values are editable from Home Assistant and persist across restarts.
 
-They control:
-
-- Automatic runtime safety limits
-- Position estimation speed
-- Set-position movement timing
+They control automatic runtime safety limits, position estimation speed, and set-position movement timing.
 
 Current defaults:
 
@@ -128,149 +105,18 @@ Current defaults:
 | Bed Slide Open Seconds | 28 seconds |
 | Bed Slide Close Seconds | 23 seconds |
 
-## Cover Behavior
-
-The awning and bed slide use a press-and-hold BLE command model matching the Precision Circuits app behavior.
-
-For each cover:
-
-- Open sends a release/neutral frame, then repeated hold frames
-- Close sends a release/neutral frame, then repeated hold frames
-- Stop sends release/neutral frames
-- Position is estimated from elapsed movement time
-- Movement initiated from the wall panel is tracked from live BLE state bits
-- Travel-time Number entities determine full-open and full-close timing
-
-## Position Estimation
-
-The system does not currently have physical position sensors for the awning or bed slide. Position is estimated by timing movement.
-
-Position convention:
-
-- `0%` = fully closed / retracted
-- `100%` = fully open / extended
-
-Position can stay synchronized when using either:
-
-- Home Assistant controls
-- RV wall panel controls
-
-because the integration receives live BLE movement notifications.
-
-The estimate may drift over time due to motor speed changes, battery voltage, friction, or mechanical wear. The configurable travel-time Number entities allow recalibration without editing code.
-
-## Current BLE State Mapping
-
-The `02BB` notification payload is decoded as a sequence of 16-bit words.
-
-### Word 0
-
-| Function | Bit |
-|---|---:|
-| Awning Light | `0x0100` |
-| Awning In Active | `0x0002` |
-| Awning Out Active | `0x0004` |
-| Water Heater | `0x1000` |
-| Water Pump | `0x8000` |
-
-### Word 1
-
-| Function | Bit |
-|---|---:|
-| Bed Slide Out Active | `0x1000` |
-| Bed Slide In Active | `0x0800` |
-
-## Known Command Packets
-
-All command writes go to the Precision Plex control characteristic:
-
-```text
-03726f62-6f74-7061-6a61-6d61732e6361
-```
-
-Known command packets:
-
-### Awning Light
-
-Tap / toggle:
-
-```text
-55 1D 10 0B 00 3F 00 00 00 00 00 00 00 00 00 34
-```
-
-### Water Pump
-
-Tap / toggle:
-
-```text
-55 1D 10 0B 00 07 00 00 00 00 00 00 00 00 00 6C
-```
-
-### Water Heater
-
-Tap / toggle:
-
-```text
-55 1D 10 0B 00 04 00 00 00 00 00 00 00 00 00 6F
-```
-
-### Awning Out
-
-Release / neutral:
-
-```text
-55 1D 10 0B 00 0A 00 00 00 00 00 00 00 00 00 69
-```
-
-Hold:
-
-```text
-55 1D 10 0B 00 0A 00 01 00 00 00 00 00 00 00 68
-```
-
-### Awning In
-
-Release / neutral:
-
-```text
-55 1D 10 0B 00 09 00 00 00 00 00 00 00 00 00 6A
-```
-
-Hold:
-
-```text
-55 1D 10 0B 00 09 00 01 00 00 00 00 00 00 00 69
-```
-
-### Bed Slide Out
-
-Release / neutral:
-
-```text
-55 1D 10 0B 00 14 00 00 00 00 00 00 00 00 00 5F
-```
-
-Hold:
-
-```text
-55 1D 10 0B 00 14 00 01 00 00 00 00 00 00 00 5E
-```
-
-### Bed Slide In
-
-Release / neutral:
-
-```text
-55 1D 10 0B 00 13 00 00 00 00 00 00 00 00 00 60
-```
-
-Hold:
-
-```text
-55 1D 10 0B 00 13 00 01 00 00 00 00 00 00 00 5F
-```
-
 ## Installation
+
+### HACS Custom Repository
+
+1. Open HACS in Home Assistant.
+2. Add this repository as a custom repository.
+3. Select repository type: **Integration**.
+4. Install **Precision Plex**.
+5. Restart Home Assistant.
+6. Add the Precision Plex integration from **Settings → Devices & Services**.
+
+### Manual Installation
 
 Copy the integration folder into Home Assistant:
 
@@ -280,11 +126,21 @@ config/custom_components/precision_plex
 
 Then restart Home Assistant.
 
-After restart, add or configure the Precision Plex integration from:
+## Documentation
 
-```text
-Settings → Devices & Services
-```
+Protocol and reverse-engineering documentation is maintained under `/docs`.
+
+Useful starting points:
+
+- [`docs/architecture.md`](docs/architecture.md)
+- [`docs/protocol_overview.md`](docs/protocol_overview.md)
+- [`docs/ble_characteristics.md`](docs/ble_characteristics.md)
+- [`docs/state_mapping.md`](docs/state_mapping.md)
+- [`docs/command_mapping.md`](docs/command_mapping.md)
+- [`docs/position_estimation.md`](docs/position_estimation.md)
+- [`docs/test_environment.md`](docs/test_environment.md)
+- [`docs/contribution_guide.md`](docs/contribution_guide.md)
+- [`docs/coaches/georgetown_gt5_34m5.md`](docs/coaches/georgetown_gt5_34m5.md)
 
 ## Safety Notes
 
@@ -300,21 +156,6 @@ Use care when testing:
 
 The integration includes timed safety limits for covers, but it does not replace operator awareness.
 
-## Current Status
-
-v2.4.1 is a known-good working baseline with:
-
-- Bidirectional BLE state synchronization
-- Persistent BLE notification monitoring
-- Awning control
-- Bed slide control
-- Water pump control
-- Water heater control
-- Awning light control
-- Position estimation
-- Configurable travel times
-- Wall-panel movement tracking
-
 ## Planned / Future Work
 
 Likely next targets:
@@ -324,7 +165,6 @@ Likely next targets:
 - Additional Wireless TP functions
 - Dashboard examples
 - Better diagnostics
-- Optional HACS packaging
 - Expanded protocol documentation
 
 The long-term goal is a complete native Home Assistant replacement for the Precision Circuits Wireless TP app.

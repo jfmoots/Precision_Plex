@@ -1,9 +1,9 @@
 {
   "domain": "precision_plex",
   "name": "Precision Plex",
-  "version": "2.4.1",
-  "documentation": "https://github.com/jfmoots/Precision-Plex-HA",
-  "issue_tracker": "https://github.com/jfmoots/Precision-Plex-HA/issues",
+  "version": "2.4.2",
+  "documentation": "https://github.com/jfmoots/Precision_Plex",
+  "issue_tracker": "https://github.com/jfmoots/Precision_Plex/issues",
   "codeowners": [
     "@jfmoots"
   ],
