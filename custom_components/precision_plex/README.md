@@ -10,7 +10,7 @@ A custom Home Assistant integration for Precision Circuits Precision Plex system
 
 ## Current Recommended Release
 
-**v2.6.2** is the current recommended release.
+**v2.6.3** is the current recommended release.
 
 Earlier releases are retained for historical and development reference. The v1.x releases document the original monitoring/coexistence architecture. The v2.x releases document the transition toward a native Home Assistant replacement for the Precision Circuits Wireless TP application.
 
@@ -69,7 +69,7 @@ When Home Assistant is connected, the Precision Circuits iOS application may be 
 
 ## Current Stable Feature Set
 
-Tested and working as of v2.6.2:
+Tested and working as of v2.6.3:
 
 ### Controls
 
@@ -201,3 +201,24 @@ These travel times were validated on a Precision Plex system installed in a **20
 | Sofa Slide | 32 seconds | 28 seconds |
 
 Travel times vary by coach, slide mechanism, battery voltage, maintenance condition, and motor wear. These values are reference calibrations for this specific Georgetown GT5 34M5 installation and can be adjusted through the Home Assistant Number entities without modifying the integration.
+
+
+## Restore Cover Positions After Restart
+
+Cover entities restore their last Home Assistant-known estimated position after Home Assistant restarts or the integration reloads.
+
+This applies to:
+
+- Awning
+- Bed Slide
+- Wardrobe Slide
+- Sofa Slide
+
+The restored value is still an estimate. If the awning or slides are moved while Home Assistant is offline, the restored position may be stale until recalibrated or moved again through Home Assistant while connected.
+
+
+## Clean Disable / Enable Lifecycle
+
+The integration can be disabled and re-enabled from Home Assistant without requiring a full Home Assistant restart.
+
+During unload, the integration stops the persistent BLE coordinator, cancels and awaits the BLE monitor task, disconnects the BLE client, removes stale startup callbacks, clears listeners, and unloads platforms cleanly.

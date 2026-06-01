@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     AWNING_IN_HOLD,
@@ -133,7 +134,7 @@ async def async_setup_entry(
     )
 
 
-class PrecisionPlexTimedCover(CoverEntity):
+class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
     """Precision Plex cover using app-like press-and-hold BLE packets."""
 
     _attr_has_entity_name = True
@@ -168,11 +169,48 @@ class PrecisionPlexTimedCover(CoverEntity):
         self._last_position_update_at: float | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to coordinator updates."""
+        """Restore last estimated position and subscribe to coordinator updates."""
+        await self._async_restore_last_position()
+
         self._remove_listener = self.coordinator.async_add_listener(
             self._handle_coordinator_update
         )
         self._sync_motion_from_state()
+
+    async def _async_restore_last_position(self) -> None:
+        """Restore the last Home Assistant estimated cover position."""
+        last_state = await self.async_get_last_state()
+        if last_state is None:
+            return
+
+        restored_position = last_state.attributes.get("current_position")
+
+        if restored_position is None:
+            # Fallback for older states or unusual recorder data.
+            if last_state.state == "open":
+                restored_position = 100
+            elif last_state.state == "closed":
+                restored_position = 0
+
+        if restored_position is None:
+            return
+
+        try:
+            self._estimated_position = float(max(0, min(100, float(restored_position))))
+        except (TypeError, ValueError):
+            _LOGGER.debug(
+                "Precision Plex %s could not restore position from state=%s attributes=%s",
+                self._plex_description.key,
+                last_state.state,
+                dict(last_state.attributes),
+            )
+            return
+
+        _LOGGER.debug(
+            "Precision Plex %s restored estimated position to %.1f%%",
+            self._plex_description.key,
+            self._estimated_position,
+        )
 
     async def async_will_remove_from_hass(self) -> None:
         """Stop stream and unsubscribe."""

@@ -1,1 +1,1 @@
-Precision Plex v2.6.2 — Motion Control Complete
+Precision Plex v2.6.3 — Restore Cover Positions After Restart
