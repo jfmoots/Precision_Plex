@@ -1,10 +1,16 @@
 # Precision Plex Home Assistant Integration
 
+## Tested Coach and Scope
+
+This integration was reverse engineered from a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
+
+Different Precision Plex equipped coaches may expose different numbers of slides, lights, tanks, relays, and sensors. The protocol documentation in `/docs` is intended to help other owners adapt the integration to their specific coach configuration.
+
 A custom Home Assistant integration for Precision Circuits Precision Plex systems.
 
 ## Current Recommended Release
 
-**v2.4.2** is the current recommended release.
+**v2.6.2** is the current recommended release.
 
 Earlier releases are retained for historical and development reference. The v1.x releases document the original monitoring/coexistence architecture. The v2.x releases document the transition toward a native Home Assistant replacement for the Precision Circuits Wireless TP application.
 
@@ -63,7 +69,7 @@ When Home Assistant is connected, the Precision Circuits iOS application may be 
 
 ## Current Stable Feature Set
 
-Tested and working as of v2.4.2:
+Tested and working as of v2.6.2:
 
 ### Controls
 
@@ -72,6 +78,8 @@ Tested and working as of v2.4.2:
 - `switch.water_heater`
 - `cover.awning`
 - `cover.bed_slide`
+- `cover.wardrobe_slide`
+- `cover.sofa_slide`
 
 ### Status / Movement Sensors
 
@@ -82,6 +90,10 @@ Tested and working as of v2.4.2:
 - Awning retracting
 - Bed slide extending
 - Bed slide retracting
+- Wardrobe slide extending
+- Wardrobe slide retracting
+- Sofa slide extending
+- Sofa slide retracting
 
 ### Configurable Travel-Time Settings
 
@@ -91,6 +103,10 @@ Travel times are exposed as Home Assistant Number entities:
 - `number.awning_close_seconds`
 - `number.bed_slide_open_seconds`
 - `number.bed_slide_close_seconds`
+- `number.wardrobe_slide_open_seconds`
+- `number.wardrobe_slide_close_seconds`
+- `number.sofa_slide_open_seconds`
+- `number.sofa_slide_close_seconds`
 
 These values are editable from Home Assistant and persist across restarts.
 
@@ -103,7 +119,11 @@ Current defaults:
 | Awning Open Seconds | 18 seconds |
 | Awning Close Seconds | 25 seconds |
 | Bed Slide Open Seconds | 28 seconds |
-| Bed Slide Close Seconds | 23 seconds |
+| Bed Slide Close Seconds | 24 seconds |
+| Wardrobe Slide Open Seconds | 18 seconds |
+| Wardrobe Slide Close Seconds | 17 seconds |
+| Sofa Slide Open Seconds | 32 seconds |
+| Sofa Slide Close Seconds | 28 seconds |
 
 ## Installation
 
@@ -161,10 +181,23 @@ The integration includes timed safety limits for covers, but it does not replace
 Likely next targets:
 
 - Sofa Slide
-- Wardrobe Slide
+- Sofa Slide
 - Additional Wireless TP functions
 - Dashboard examples
 - Better diagnostics
 - Expanded protocol documentation
 
 The long-term goal is a complete native Home Assistant replacement for the Precision Circuits Wireless TP app.
+
+## Reference Calibrations
+
+These travel times were validated on a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
+
+| Device | Open / Out | Close / In |
+|---|---:|---:|
+| Awning | 18 seconds | 25 seconds |
+| Bed Slide | 28 seconds | 24 seconds |
+| Wardrobe Slide | 18 seconds | 17 seconds |
+| Sofa Slide | 32 seconds | 28 seconds |
+
+Travel times vary by coach, slide mechanism, battery voltage, maintenance condition, and motor wear. These values are reference calibrations for this specific Georgetown GT5 34M5 installation and can be adjusted through the Home Assistant Number entities without modifying the integration.

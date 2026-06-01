@@ -21,7 +21,11 @@ DEFAULT_TRAVEL_TIMES: dict[str, float] = {
     "awning_open_seconds": 18.0,
     "awning_close_seconds": 25.0,
     "bed_slide_open_seconds": 28.0,
-    "bed_slide_close_seconds": 23.0,
+    "bed_slide_close_seconds": 24.0,
+    "wardrobe_slide_open_seconds": 18.0,
+    "wardrobe_slide_close_seconds": 17.0,
+    "sofa_slide_open_seconds": 32.0,
+    "sofa_slide_close_seconds": 28.0,
 }
 
 
@@ -57,6 +61,26 @@ NUMBERS: tuple[PrecisionPlexNumberDescription, ...] = (
         key="bed_slide_close_seconds",
         name="Bed Slide Close Seconds",
         default=DEFAULT_TRAVEL_TIMES["bed_slide_close_seconds"],
+    ),
+    PrecisionPlexNumberDescription(
+        key="wardrobe_slide_open_seconds",
+        name="Wardrobe Slide Open Seconds",
+        default=DEFAULT_TRAVEL_TIMES["wardrobe_slide_open_seconds"],
+    ),
+    PrecisionPlexNumberDescription(
+        key="wardrobe_slide_close_seconds",
+        name="Wardrobe Slide Close Seconds",
+        default=DEFAULT_TRAVEL_TIMES["wardrobe_slide_close_seconds"],
+    ),
+    PrecisionPlexNumberDescription(
+        key="sofa_slide_open_seconds",
+        name="Sofa Slide Open Seconds",
+        default=DEFAULT_TRAVEL_TIMES["sofa_slide_open_seconds"],
+    ),
+    PrecisionPlexNumberDescription(
+        key="sofa_slide_close_seconds",
+        name="Sofa Slide Close Seconds",
+        default=DEFAULT_TRAVEL_TIMES["sofa_slide_close_seconds"],
     ),
 )
 

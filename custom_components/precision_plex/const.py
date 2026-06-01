@@ -56,6 +56,30 @@ STATE_BITS = {
         "bit": 0x0800,
         "device_class": "moving",
     },
+    "wardrobe_slide_out": {
+        "name": "Wardrobe Slide Out",
+        "word_index": 1,
+        "bit": 0x0400,
+        "device_class": "moving",
+    },
+    "wardrobe_slide_in": {
+        "name": "Wardrobe Slide In",
+        "word_index": 1,
+        "bit": 0x0200,
+        "device_class": "moving",
+    },
+    "sofa_slide_out": {
+        "name": "Sofa Slide Out",
+        "word_index": 1,
+        "bit": 0x0100,
+        "device_class": "moving",
+    },
+    "sofa_slide_in": {
+        "name": "Sofa Slide In",
+        "word_index": 0,
+        "bit": 0x0080,
+        "device_class": "moving",
+    },
 }
 
 
@@ -119,4 +143,34 @@ BED_SLIDE_IN_RELEASE = bytes.fromhex(
 )
 BED_SLIDE_IN_HOLD = bytes.fromhex(
     "55 1D 10 0B 00 13 00 01 00 00 00 00 00 00 00 5F"
+)
+
+# Wardrobe slide command packets captured from the Precision iOS app.
+WARDROBE_SLIDE_OUT_RELEASE = bytes.fromhex(
+    "55 1D 10 0B 00 12 00 00 00 00 00 00 00 00 00 61"
+)
+WARDROBE_SLIDE_OUT_HOLD = bytes.fromhex(
+    "55 1D 10 0B 00 12 00 01 00 00 00 00 00 00 00 60"
+)
+WARDROBE_SLIDE_IN_RELEASE = bytes.fromhex(
+    "55 1D 10 0B 00 11 00 00 00 00 00 00 00 00 00 62"
+)
+WARDROBE_SLIDE_IN_HOLD = bytes.fromhex(
+    "55 1D 10 0B 00 11 00 01 00 00 00 00 00 00 00 61"
+)
+
+# Sofa slide command packets captured from the Precision iOS app.
+# Sofa OUT uses command id 0x0010. The app sends 0000 once, then repeats 0001 while held.
+SOFA_SLIDE_OUT_RELEASE = bytes.fromhex(
+    "55 1D 10 0B 00 10 00 00 00 00 00 00 00 00 00 63"
+)
+SOFA_SLIDE_OUT_HOLD = bytes.fromhex(
+    "55 1D 10 0B 00 10 00 01 00 00 00 00 00 00 00 62"
+)
+# Sofa IN uses command id 0x000F. The app sends 0000 once, then repeats 0001 while held.
+SOFA_SLIDE_IN_RELEASE = bytes.fromhex(
+    "55 1D 10 0B 00 0F 00 00 00 00 00 00 00 00 00 64"
+)
+SOFA_SLIDE_IN_HOLD = bytes.fromhex(
+    "55 1D 10 0B 00 0F 00 01 00 00 00 00 00 00 00 63"
 )

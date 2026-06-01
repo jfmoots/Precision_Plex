@@ -1,1 +1,1 @@
-Precision Plex v2.4.2 — Documentation & Protocol Reference Update
+Precision Plex v2.6.2 — Motion Control Complete

@@ -100,6 +100,41 @@ Status: Verified
 
 Status: Verified
 
+
+## Wardrobe Slide Commands
+
+### Wardrobe Slide Out / Extend Release
+
+```text
+55 1D 10 0B 00 12 00 00 00 00 00 00 00 00 00 61
+```
+
+Status: Verified
+
+### Wardrobe Slide Out / Extend Hold
+
+```text
+55 1D 10 0B 00 12 00 01 00 00 00 00 00 00 00 60
+```
+
+Status: Verified
+
+### Wardrobe Slide In / Retract Release
+
+```text
+55 1D 10 0B 00 11 00 00 00 00 00 00 00 00 00 62
+```
+
+Status: Verified
+
+### Wardrobe Slide In / Retract Hold
+
+```text
+55 1D 10 0B 00 11 00 01 00 00 00 00 00 00 00 61
+```
+
+Status: Verified
+
 ## Movement Command Behavior
 
 Movement commands behave like press-and-hold controls.
@@ -111,3 +146,47 @@ The mobile app pattern is:
 3. Send release/neutral when the button is released.
 
 The integration reproduces this pattern for cover entities.
+
+
+## Sofa Slide Commands
+
+### Sofa Slide Out / Extend Release
+
+```text
+55 1D 10 0B 00 10 00 00 00 00 00 00 00 00 00 63
+```
+
+Status: Verified
+
+### Sofa Slide Out / Extend Hold
+
+```text
+55 1D 10 0B 00 10 00 01 00 00 00 00 00 00 00 62
+```
+
+Status: Verified
+
+### Sofa Slide In / Retract Release
+
+```text
+55 1D 10 0B 00 0F 00 00 00 00 00 00 00 00 00 64
+```
+
+Status: Verified
+
+### Sofa Slide In / Retract Hold
+
+```text
+55 1D 10 0B 00 0F 00 01 00 00 00 00 00 00 00 63
+```
+
+Status: Verified
+
+### Stop / Release
+
+```text
+55 1D 10 0B 00 3F 00 00 00 00 00 00 00 00 00 34
+```
+
+Status: Verified shared movement stop command
+

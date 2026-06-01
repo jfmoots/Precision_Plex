@@ -18,6 +18,8 @@ The payload is decoded as multiple big-endian 16-bit words.
 
 | Bit | Function | Status | Notes |
 |---:|---|---|---|
+| `0x0200` | Wardrobe Slide In Active | Verified | Wardrobe slide retracting |
+| `0x0400` | Wardrobe Slide Out Active | Verified | Wardrobe slide extending |
 | `0x0800` | Bed Slide In Active | Verified | Bed slide retracting |
 | `0x1000` | Bed Slide Out Active | Verified | Bed slide extending |
 
@@ -43,3 +45,28 @@ When identifying a new state bit:
 4. Compare changed 16-bit words.
 5. Confirm the bit clears when the function stops.
 6. Document coach model, year, and function name.
+
+
+## Sofa Slide State Bits
+
+Captured from Sofa slide packet traces.
+
+| Notification | Word Index | Bit | Function | Status |
+|---|---:|---:|---|---|
+| `0x002F` | 1 | `0x0100` | Sofa Slide Out Active | Verified in trace |
+| `0x002F` | 0 | `0x0080` | Sofa Slide In Active | Verified in trace |
+
+
+
+## Reference Calibrations
+
+These travel times were validated on a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
+
+| Device | Open / Out | Close / In |
+|---|---:|---:|
+| Awning | 18 seconds | 25 seconds |
+| Bed Slide | 28 seconds | 24 seconds |
+| Wardrobe Slide | 18 seconds | 17 seconds |
+| Sofa Slide | 32 seconds | 28 seconds |
+
+Travel times vary by coach, slide mechanism, battery voltage, maintenance condition, and motor wear. These values are reference calibrations for this specific Georgetown GT5 34M5 installation and can be adjusted through the Home Assistant Number entities without modifying the integration.

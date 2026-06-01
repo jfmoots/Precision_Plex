@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from contextlib import suppress
 
 from bleak import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
@@ -56,24 +57,47 @@ class PrecisionPlexStateCoordinator:
         self._listeners: list[Callable[[], None]] = []
         self._stopped = False
         self._write_lock = asyncio.Lock()
+        self._start_unsub: Callable[[], None] | None = None
 
     async def async_start(self) -> None:
         """Start after Home Assistant startup completes."""
-        async_at_started(self.hass, self._handle_homeassistant_started)
+        self._stopped = False
+
+        self._start_unsub = async_at_started(
+            self.hass,
+            self._handle_homeassistant_started,
+        )
 
     @callback
     def _handle_homeassistant_started(self, hass: HomeAssistant) -> None:
         """Start the BLE connection task after HA has started."""
+        if self._stopped:
+            return
+
         if self._task is None or self._task.done():
             self._task = self.hass.async_create_task(self._connection_loop())
 
     async def async_stop(self) -> None:
-        """Stop coordinator and disconnect."""
+        """Stop coordinator, cancel the monitor task, and disconnect BLE cleanly."""
         self._stopped = True
-        if self._task is not None:
-            self._task.cancel()
-            self._task = None
+
+        if self._start_unsub is not None:
+            self._start_unsub()
+            self._start_unsub = None
+
+        task = self._task
+        self._task = None
+
+        if task is not None and not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
         await self._async_disconnect()
+
+        self.available = False
+        self._notify_listeners()
+        self._listeners.clear()
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
@@ -101,42 +125,54 @@ class PrecisionPlexStateCoordinator:
 
     async def _connection_loop(self) -> None:
         """Keep a read-only BLE subscription active."""
-        while not self._stopped:
-            try:
-                await self._connect_and_subscribe()
-                while (
-                    not self._stopped
-                    and self._client is not None
-                    and self._client.is_connected
-                ):
-                    await asyncio.sleep(1)
+        try:
+            while not self._stopped:
+                try:
+                    await self._connect_and_subscribe()
 
-            except asyncio.CancelledError:
-                raise
-            except BLE_EXCEPTIONS as err:
-                self.available = False
-                _LOGGER.debug("Precision Plex monitor BLE error: %r", err)
-                self._notify_listeners()
-            except Exception as err:
-                self.available = False
-                _LOGGER.warning("Precision Plex monitor unexpected error: %r", err)
-                self._notify_listeners()
+                    while (
+                        not self._stopped
+                        and self._client is not None
+                        and self._client.is_connected
+                    ):
+                        await asyncio.sleep(1)
 
+                except asyncio.CancelledError:
+                    raise
+                except BLE_EXCEPTIONS as err:
+                    self.available = False
+                    _LOGGER.debug("Precision Plex monitor BLE error: %r", err)
+                    self._notify_listeners()
+                except Exception as err:
+                    self.available = False
+                    _LOGGER.warning("Precision Plex monitor unexpected error: %r", err)
+                    self._notify_listeners()
+
+                await self._async_disconnect()
+
+                if not self._stopped:
+                    await asyncio.sleep(RECONNECT_DELAY_SECONDS)
+
+        finally:
             await self._async_disconnect()
-            if not self._stopped:
-                await asyncio.sleep(RECONNECT_DELAY_SECONDS)
-
+            self.available = False
+            self._notify_listeners()
 
     def _disconnected_callback(self, client: BleakClientWithServiceCache) -> None:
         """Handle BLE disconnection."""
         self.available = False
+
+        if self._stopped or self.hass.loop.is_closed():
+            return
+
         self.hass.loop.call_soon_threadsafe(self._notify_listeners)
 
     async def _connect_and_subscribe(self) -> None:
         """Connect, read current state, then subscribe to notifications."""
+        if self._stopped:
+            raise BleakError("Precision Plex coordinator is stopping")
+
         if self._client is not None and self._client.is_connected:
-            # Already connected/subscribed by the monitor loop. Do not call
-            # start_notify again; BlueZ returns NotPermitted / Notify acquired.
             self.available = True
             self._notify_listeners()
             return
@@ -160,6 +196,10 @@ class PrecisionPlexStateCoordinator:
             timeout=CONNECT_TIMEOUT,
         )
 
+        if self._stopped:
+            await self._async_disconnect()
+            raise BleakError("Precision Plex coordinator stopped during connect")
+
         await asyncio.sleep(0.25)
         await self._async_prime_session(self._client)
         await self._async_read_state(self._client)
@@ -175,9 +215,6 @@ class PrecisionPlexStateCoordinator:
             )
             _LOGGER.warning("Precision Plex monitor subscribed to 02BB state notifications")
         except BleakError as err:
-            # If BlueZ says notifications are already acquired, that means the
-            # monitor subscription is alive. Treat it as success instead of
-            # tearing down the entity.
             if "Notify acquired" not in repr(err) and "NotPermitted" not in repr(err):
                 raise
             _LOGGER.warning("Precision Plex monitor notification already active; continuing")
@@ -187,23 +224,15 @@ class PrecisionPlexStateCoordinator:
 
     async def async_write_command(self, payload: bytes) -> None:
         """Write a known-good Precision Plex command payload."""
-        client = self._client
-        if client is None or not client.is_connected:
-            await self._connect_and_subscribe()
-            client = self._client
+        if self._stopped:
+            raise BleakError("Precision Plex coordinator is stopped")
 
-        if client is None or not client.is_connected:
-            raise BleakError("Precision Plex is not connected")
-
-        control_char = client.services.get_characteristic(CONTROL_CHARACTERISTIC_UUID)
-        if control_char is None:
-            raise BleakError(f"Control characteristic {CONTROL_CHARACTERISTIC_UUID} not found")
-
-        await asyncio.wait_for(
-            client.write_gatt_char(control_char, payload, response=True),
-            timeout=GATT_TIMEOUT,
-        )
-
+        async with self._write_lock:
+            client, control_char = await self._async_get_control_char()
+            await asyncio.wait_for(
+                client.write_gatt_char(control_char, payload, response=True),
+                timeout=GATT_TIMEOUT,
+            )
 
     async def async_write_command_sequence(
         self,
@@ -211,26 +240,19 @@ class PrecisionPlexStateCoordinator:
         delay_seconds: float = 0.25,
     ) -> None:
         """Write a sequence of known-good Precision Plex command payloads."""
-        client = self._client
-        if client is None or not client.is_connected:
-            await self._connect_and_subscribe()
-            client = self._client
+        if self._stopped:
+            raise BleakError("Precision Plex coordinator is stopped")
 
-        if client is None or not client.is_connected:
-            raise BleakError("Precision Plex is not connected")
+        async with self._write_lock:
+            client, control_char = await self._async_get_control_char()
 
-        control_char = client.services.get_characteristic(CONTROL_CHARACTERISTIC_UUID)
-        if control_char is None:
-            raise BleakError(f"Control characteristic {CONTROL_CHARACTERISTIC_UUID} not found")
-
-        for index, payload in enumerate(payloads):
-            await asyncio.wait_for(
-                client.write_gatt_char(control_char, payload, response=True),
-                timeout=GATT_TIMEOUT,
-            )
-            if index < len(payloads) - 1:
-                await asyncio.sleep(delay_seconds)
-
+            for index, payload in enumerate(payloads):
+                await asyncio.wait_for(
+                    client.write_gatt_char(control_char, payload, response=True),
+                    timeout=GATT_TIMEOUT,
+                )
+                if index < len(payloads) - 1:
+                    await asyncio.sleep(delay_seconds)
 
     async def async_repeat_command_for_duration(
         self,
@@ -240,32 +262,25 @@ class PrecisionPlexStateCoordinator:
         interval_seconds: float = 0.30,
     ) -> None:
         """Repeat a hold payload for a short duration, then send release."""
-        client = self._client
-        if client is None or not client.is_connected:
-            await self._connect_and_subscribe()
-            client = self._client
+        if self._stopped:
+            raise BleakError("Precision Plex coordinator is stopped")
 
-        if client is None or not client.is_connected:
-            raise BleakError("Precision Plex is not connected")
+        async with self._write_lock:
+            client, control_char = await self._async_get_control_char()
 
-        control_char = client.services.get_characteristic(CONTROL_CHARACTERISTIC_UUID)
-        if control_char is None:
-            raise BleakError(f"Control characteristic {CONTROL_CHARACTERISTIC_UUID} not found")
-
-        end_time = asyncio.get_running_loop().time() + duration_seconds
-        try:
-            while asyncio.get_running_loop().time() < end_time:
+            end_time = asyncio.get_running_loop().time() + duration_seconds
+            try:
+                while asyncio.get_running_loop().time() < end_time:
+                    await asyncio.wait_for(
+                        client.write_gatt_char(control_char, hold_payload, response=True),
+                        timeout=GATT_TIMEOUT,
+                    )
+                    await asyncio.sleep(interval_seconds)
+            finally:
                 await asyncio.wait_for(
-                    client.write_gatt_char(control_char, hold_payload, response=True),
+                    client.write_gatt_char(control_char, release_payload, response=True),
                     timeout=GATT_TIMEOUT,
                 )
-                await asyncio.sleep(interval_seconds)
-        finally:
-            await asyncio.wait_for(
-                client.write_gatt_char(control_char, release_payload, response=True),
-                timeout=GATT_TIMEOUT,
-            )
-
 
     async def async_write_hold_stream(
         self,
@@ -275,18 +290,19 @@ class PrecisionPlexStateCoordinator:
         interval_seconds: float = 0.30,
         max_duration_seconds: float = 30.0,
     ) -> None:
-        """Send release once, then repeat hold until stopped or max duration expires.
+        """Send release once, then repeat hold until stopped or max duration expires."""
+        if self._stopped:
+            raise BleakError("Precision Plex coordinator is stopped")
 
-        Uses the existing monitor BLE connection whenever possible. This is important
-        because the Precision wireless TP appears to allow one active connection and
-        BlueZ rejects duplicate notification subscriptions with "Notify acquired".
-        """
         async with self._write_lock:
             client = self._client
             control_char = None
 
             async def _get_control_char():
                 nonlocal client, control_char
+
+                if self._stopped:
+                    raise BleakError("Precision Plex coordinator is stopped")
 
                 if client is None or not client.is_connected:
                     await self._connect_and_subscribe()
@@ -313,14 +329,14 @@ class PrecisionPlexStateCoordinator:
 
             async def _best_effort_release() -> None:
                 try:
-                    await _write(release_payload)
+                    if not self._stopped:
+                        await _write(release_payload)
                 except BLE_EXCEPTIONS as err:
-                    _LOGGER.warning("Precision Plex awning release write failed safely: %r", err)
+                    _LOGGER.warning("Precision Plex hold stream release write failed safely: %r", err)
                 except Exception as err:
-                    _LOGGER.warning("Precision Plex awning release unexpected failure: %r", err)
+                    _LOGGER.warning("Precision Plex hold stream release unexpected failure: %r", err)
 
             try:
-                # The official app sends the release/neutral frame before starting a hold stream.
                 await _write(release_payload)
 
                 end_time = asyncio.get_running_loop().time() + max_duration_seconds
@@ -334,13 +350,27 @@ class PrecisionPlexStateCoordinator:
                         pass
 
             except BLE_EXCEPTIONS as err:
-                # Do not mark the whole device unavailable here; the notification stream
-                # may still be alive. The next monitor notification will report truth.
-                _LOGGER.warning("Precision Plex awning hold stream stopped after BLE error: %r", err)
+                _LOGGER.warning("Precision Plex hold stream stopped after BLE error: %r", err)
             except Exception as err:
-                _LOGGER.warning("Precision Plex awning hold stream stopped after unexpected error: %r", err)
+                _LOGGER.warning("Precision Plex hold stream stopped after unexpected error: %r", err)
             finally:
                 await _best_effort_release()
+
+    async def _async_get_control_char(self):
+        """Return connected client and control characteristic."""
+        client = self._client
+        if client is None or not client.is_connected:
+            await self._connect_and_subscribe()
+            client = self._client
+
+        if client is None or not client.is_connected:
+            raise BleakError("Precision Plex is not connected")
+
+        control_char = client.services.get_characteristic(CONTROL_CHARACTERISTIC_UUID)
+        if control_char is None:
+            raise BleakError(f"Control characteristic {CONTROL_CHARACTERISTIC_UUID} not found")
+
+        return client, control_char
 
     async def _async_prime_session(self, client: BleakClientWithServiceCache) -> None:
         """Prime bonded BLE session."""
@@ -366,15 +396,13 @@ class PrecisionPlexStateCoordinator:
 
     def _notification_handler(self, sender: int, data: bytearray) -> None:
         """Handle 02BB notifications."""
+        if self._stopped:
+            return
         self._apply_state(bytes(data), "notify")
 
     def _apply_state(self, raw: bytes, source: str) -> None:
-        """Decode and store state from 02BB.
-
-        The 02BB payload is a sequence of 16-bit words. Early entities only used
-        word 0. Bed Slide movement bits live in word 1, so keep all words.
-        """
-        if len(raw) < 2:
+        """Decode and store state from 02BB."""
+        if self._stopped or len(raw) < 2:
             return
 
         self.raw_state = raw
@@ -392,5 +420,21 @@ class PrecisionPlexStateCoordinator:
             [f"0x{word:04X}" for word in self.state_words],
         )
 
-        self.hass.loop.call_soon_threadsafe(self._notify_listeners)
+        if not self.hass.loop.is_closed():
+            self.hass.loop.call_soon_threadsafe(self._notify_listeners)
 
+    async def _async_disconnect(self) -> None:
+        """Disconnect the BLE client."""
+        client = self._client
+        self._client = None
+
+        if client is not None and client.is_connected:
+            try:
+                _LOGGER.debug("Disconnecting Precision Plex BLE client")
+                await client.disconnect()
+            except BLE_EXCEPTIONS as err:
+                _LOGGER.debug(
+                    "Error disconnecting from Precision Plex %s: %r",
+                    self.address,
+                    err,
+                )
