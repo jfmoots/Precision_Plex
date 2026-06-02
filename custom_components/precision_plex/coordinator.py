@@ -20,7 +20,9 @@ from .const import (
     PAIRING_CHARACTERISTIC_UUID,
     PAIRING_INIT_PAYLOAD,
     STATE_CHARACTERISTIC_UUID,
+    BATTERY_CHARACTERISTIC_UUID,
     CONTROL_CHARACTERISTIC_UUID,
+    COACH_BATTERY_NOTIFY_HANDLE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,6 +52,16 @@ class PrecisionPlexStateCoordinator:
         self.state_word: int | None = None
         self.state_words: list[int] = []
         self.raw_state: bytes | None = None
+        self.raw_battery_state: bytes | None = None
+        self.coach_voltage: float | None = None
+        self.fresh_water_level: int | None = None
+        self.raw_fresh_level: int | None = None
+        self.grey_water_level: int | None = None
+        self.raw_grey_level: int | None = None
+        self.black_water_level: int | None = None
+        self.raw_black_level: int | None = None
+        self.lp_gas_level: int | None = None
+        self.raw_lp_level: int | None = None
         self.available = False
 
         self._client: BleakClientWithServiceCache | None = None
@@ -96,6 +108,16 @@ class PrecisionPlexStateCoordinator:
         await self._async_disconnect()
 
         self.available = False
+        self.coach_voltage = None
+        self.fresh_water_level = None
+        self.raw_fresh_level = None
+        self.grey_water_level = None
+        self.raw_grey_level = None
+        self.black_water_level = None
+        self.raw_black_level = None
+        self.lp_gas_level = None
+        self.raw_lp_level = None
+        self.raw_battery_state = None
         self._notify_listeners()
         self._listeners.clear()
 
@@ -202,22 +224,12 @@ class PrecisionPlexStateCoordinator:
 
         await asyncio.sleep(0.25)
         await self._async_prime_session(self._client)
+
         await self._async_read_state(self._client)
+        await self._async_read_battery_state(self._client)
 
-        state_char = self._client.services.get_characteristic(STATE_CHARACTERISTIC_UUID)
-        if state_char is None:
-            raise BleakError(f"State characteristic {STATE_CHARACTERISTIC_UUID} not found")
-
-        try:
-            await asyncio.wait_for(
-                self._client.start_notify(state_char, self._notification_handler),
-                timeout=GATT_TIMEOUT,
-            )
-            _LOGGER.warning("Precision Plex monitor subscribed to 02BB state notifications")
-        except BleakError as err:
-            if "Notify acquired" not in repr(err) and "NotPermitted" not in repr(err):
-                raise
-            _LOGGER.warning("Precision Plex monitor notification already active; continuing")
+        await self._async_start_state_notify(self._client)
+        await self._async_start_battery_notify(self._client)
 
         self.available = True
         self._notify_listeners()
@@ -392,16 +404,89 @@ class PrecisionPlexStateCoordinator:
             raise BleakError(f"State characteristic {STATE_CHARACTERISTIC_UUID} not found")
 
         data = await asyncio.wait_for(client.read_gatt_char(state_char), timeout=GATT_TIMEOUT)
-        self._apply_state(bytes(data), "read")
+        self._apply_state(bytes(data), "02BB read", None)
 
-    def _notification_handler(self, sender: int, data: bytearray) -> None:
-        """Handle 02BB notifications."""
+    async def _async_read_battery_state(self, client: BleakClientWithServiceCache) -> None:
+        """Read initial coach battery telemetry from 02AA."""
+        battery_char = client.services.get_characteristic(BATTERY_CHARACTERISTIC_UUID)
+        if battery_char is None:
+            _LOGGER.warning("Precision Plex battery characteristic not found: %s", BATTERY_CHARACTERISTIC_UUID)
+            return
+
+        try:
+            data = await asyncio.wait_for(client.read_gatt_char(battery_char), timeout=GATT_TIMEOUT)
+        except BLE_EXCEPTIONS as err:
+            _LOGGER.warning("Precision Plex battery read failed: %r", err)
+            return
+
+        self._apply_battery_state(bytes(data), "02AA read", getattr(battery_char, "handle", None))
+
+    async def _async_start_state_notify(self, client: BleakClientWithServiceCache) -> None:
+        """Subscribe to 02BB wall-panel/control state notifications."""
+        state_char = client.services.get_characteristic(STATE_CHARACTERISTIC_UUID)
+        if state_char is None:
+            raise BleakError(f"State characteristic {STATE_CHARACTERISTIC_UUID} not found")
+
+        try:
+            await asyncio.wait_for(
+                client.start_notify(state_char, self._notification_handler),
+                timeout=GATT_TIMEOUT,
+            )
+            _LOGGER.warning(
+                "Precision Plex monitor subscribed to 02BB state notifications uuid=%s handle=0x%04X",
+                state_char.uuid,
+                state_char.handle,
+            )
+        except BleakError as err:
+            if "Notify acquired" not in repr(err) and "NotPermitted" not in repr(err):
+                raise
+            _LOGGER.warning("Precision Plex 02BB notification already active; continuing")
+
+    async def _async_start_battery_notify(self, client: BleakClientWithServiceCache) -> None:
+        """Subscribe to 02AA coach battery telemetry notifications."""
+        battery_char = client.services.get_characteristic(BATTERY_CHARACTERISTIC_UUID)
+        if battery_char is None:
+            _LOGGER.warning("Precision Plex battery characteristic not found: %s", BATTERY_CHARACTERISTIC_UUID)
+            return
+
+        try:
+            await asyncio.wait_for(
+                client.start_notify(battery_char, self._battery_notification_handler),
+                timeout=GATT_TIMEOUT,
+            )
+            _LOGGER.warning(
+                "Precision Plex monitor subscribed to 02AA battery notifications uuid=%s handle=0x%04X",
+                battery_char.uuid,
+                battery_char.handle,
+            )
+        except BleakError as err:
+            if "Notify acquired" not in repr(err) and "NotPermitted" not in repr(err):
+                raise
+            _LOGGER.warning("Precision Plex 02AA battery notification already active; continuing")
+
+    def _notification_handler(self, sender, data: bytearray) -> None:
+        """Handle Precision Plex notifications.
+
+        Bleak may pass either an integer handle or a BleakGATTCharacteristic
+        object as sender, depending on the Home Assistant/Bleak version.
+        Normalize it so handle-based telemetry decoding works reliably.
+        """
         if self._stopped:
             return
-        self._apply_state(bytes(data), "notify")
 
-    def _apply_state(self, raw: bytes, source: str) -> None:
-        """Decode and store state from 02BB."""
+        sender_handle = sender if isinstance(sender, int) else getattr(sender, "handle", None)
+        self._apply_state(bytes(data), "02BB notify", sender_handle)
+
+    def _battery_notification_handler(self, sender, data: bytearray) -> None:
+        """Handle Precision Plex 02AA coach battery telemetry notifications."""
+        if self._stopped:
+            return
+
+        sender_handle = sender if isinstance(sender, int) else getattr(sender, "handle", None)
+        self._apply_battery_state(bytes(data), "02AA notify", sender_handle)
+
+    def _apply_state(self, raw: bytes, source: str, sender: int | None = None) -> None:
+        """Decode and store state from Precision Plex monitor notifications."""
         if self._stopped or len(raw) < 2:
             return
 
@@ -414,10 +499,146 @@ class PrecisionPlexStateCoordinator:
         self.available = True
 
         _LOGGER.debug(
-            "Precision Plex 02BB %s raw=%s state_words=%s",
+            "Precision Plex 02BB %s sender=%s raw=%s state_words=%s coach_voltage=%s",
             source,
+            f"0x{sender:04X}" if isinstance(sender, int) else None,
             raw.hex(" "),
             [f"0x{word:04X}" for word in self.state_words],
+            self.coach_voltage,
+        )
+
+        if not self.hass.loop.is_closed():
+            self.hass.loop.call_soon_threadsafe(self._notify_listeners)
+
+    def _apply_battery_state(self, raw: bytes, source: str, sender: int | None = None) -> None:
+        """Decode and store coach battery voltage and tank levels from 02AA telemetry."""
+        if self._stopped or len(raw) < 2:
+            return
+
+        raw_voltage = int.from_bytes(raw[0:2], "big")
+
+        # Confirmed captures:
+        #   00 88 -> 136 -> 13.6 V
+        #   00 7D -> 125 -> 12.5 V
+        #   00 83 -> 131 -> 13.1 V
+        if 80 <= raw_voltage <= 180:
+            self.coach_voltage = raw_voltage / 10
+            self.raw_battery_state = raw
+            self.available = True
+        else:
+            _LOGGER.debug(
+                "Precision Plex 02AA voltage field ignored from %s sender=%s raw=%s raw_word=0x%04X",
+                source,
+                f"0x{sender:04X}" if isinstance(sender, int) else None,
+                raw.hex(" "),
+                raw_voltage,
+            )
+
+        tank_map = {0x00: 0, 0x03: 33, 0x06: 67, 0x0A: 100}
+
+        if len(raw) >= 3:
+            # Controlled jumper/app captures from 2026-06-02:
+            #   00 83 00 0F... -> Fresh Empty
+            #   00 83 03 0F... -> Fresh 1/3
+            #   00 83 06 0F... -> Fresh 2/3
+            #   00 83 0A 0F... -> Fresh Full
+            # Fresh is the low nibble of byte index 2.
+            raw_fresh = raw[2] & 0x0F
+            if raw_fresh in tank_map:
+                self.raw_fresh_level = raw_fresh
+                self.fresh_water_level = tank_map[raw_fresh]
+                self.raw_battery_state = raw
+                self.available = True
+            else:
+                _LOGGER.debug(
+                    "Precision Plex 02AA fresh nibble ignored from %s sender=%s raw=%s raw_fresh=0x%X",
+                    source,
+                    f"0x{sender:04X}" if isinstance(sender, int) else None,
+                    raw.hex(" "),
+                    raw_fresh,
+                )
+
+        if len(raw) >= 4:
+            # Controlled Grey app captures from 2026-06-02:
+            #   00 83 00 0F... -> Grey Empty
+            #   00 83 00 3F... -> Grey 1/3
+            # Grey is the high nibble of byte index 3.
+            raw_grey = (raw[3] & 0xF0) >> 4
+            if raw_grey in tank_map:
+                self.raw_grey_level = raw_grey
+                self.grey_water_level = tank_map[raw_grey]
+                self.raw_battery_state = raw
+                self.available = True
+            else:
+                _LOGGER.debug(
+                    "Precision Plex 02AA grey nibble ignored from %s sender=%s raw=%s raw_grey=0x%X",
+                    source,
+                    f"0x{sender:04X}" if isinstance(sender, int) else None,
+                    raw.hex(" "),
+                    raw_grey,
+                )
+
+        if len(raw) >= 5:
+            # Controlled Black app captures from 2026-06-02:
+            #   00 83 00 0F 0F 50... -> Black Empty
+            #   00 83 00 0F 3F 50... -> Black 1/3
+            # Assuming same tank nibble scale as Fresh/Grey:
+            #   0x0=Empty, 0x3=1/3, 0x6=2/3, 0xA=Full
+            # Black is the high nibble of byte index 4.
+            raw_black = (raw[4] & 0xF0) >> 4
+            if raw_black in tank_map:
+                self.raw_black_level = raw_black
+                self.black_water_level = tank_map[raw_black]
+                self.raw_battery_state = raw
+                self.available = True
+            else:
+                _LOGGER.debug(
+                    "Precision Plex 02AA black nibble ignored from %s sender=%s raw=%s raw_black=0x%X",
+                    source,
+                    f"0x{sender:04X}" if isinstance(sender, int) else None,
+                    raw.hex(" "),
+                    raw_black,
+                )
+
+
+        if len(raw) >= 6:
+            # Controlled LP app captures from 2026-06-02:
+            #   00 83 06 3F 3F 00... -> LP Empty
+            #   00 83 06 3F 3F 20... -> LP 1/4
+            #   00 83 06 3F 3F 50... -> LP 1/2
+            #   00 83 06 3F 3F 70... -> LP 3/4
+            #   00 83 06 3F 3F A0... -> LP Full
+            # LP is the high nibble of byte index 5.
+            lp_map = {0x00: 0, 0x02: 25, 0x05: 50, 0x07: 75, 0x0A: 100}
+            raw_lp = (raw[5] & 0xF0) >> 4
+            if raw_lp in lp_map:
+                self.raw_lp_level = raw_lp
+                self.lp_gas_level = lp_map[raw_lp]
+                self.raw_battery_state = raw
+                self.available = True
+            else:
+                _LOGGER.debug(
+                    "Precision Plex 02AA LP nibble ignored from %s sender=%s raw=%s raw_lp=0x%X",
+                    source,
+                    f"0x{sender:04X}" if isinstance(sender, int) else None,
+                    raw.hex(" "),
+                    raw_lp,
+                )
+
+        _LOGGER.debug(
+            "Precision Plex 02AA decoded from %s sender=%s raw=%s coach_voltage=%s fresh_water_level=%s raw_fresh=%s grey_water_level=%s raw_grey=%s black_water_level=%s raw_black=%s lp_gas_level=%s raw_lp=%s",
+            source,
+            f"0x{sender:04X}" if isinstance(sender, int) else None,
+            raw.hex(" "),
+            self.coach_voltage,
+            self.fresh_water_level,
+            f"0x{self.raw_fresh_level:X}" if isinstance(self.raw_fresh_level, int) else None,
+            self.grey_water_level,
+            f"0x{self.raw_grey_level:X}" if isinstance(self.raw_grey_level, int) else None,
+            self.black_water_level,
+            f"0x{self.raw_black_level:X}" if isinstance(self.raw_black_level, int) else None,
+            self.lp_gas_level,
+            f"0x{self.raw_lp_level:X}" if isinstance(self.raw_lp_level, int) else None,
         )
 
         if not self.hass.loop.is_closed():

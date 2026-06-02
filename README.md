@@ -1,75 +1,51 @@
 # Precision Plex Home Assistant Integration
 
-## Tested Coach and Scope
-
-This integration was reverse engineered from a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
-
-Different Precision Plex equipped coaches may expose different numbers of slides, lights, tanks, relays, and sensors. The protocol documentation in `/docs` is intended to help other owners adapt the integration to their specific coach configuration.
-
 A custom Home Assistant integration for Precision Circuits Precision Plex systems.
 
 ## Current Recommended Release
 
-**v2.6.3** is the current recommended release.
+**v2.6.26** is the current recommended release.
 
-Earlier releases are retained for historical and development reference. The v1.x releases document the original monitoring/coexistence architecture. The v2.x releases document the transition toward a native Home Assistant replacement for the Precision Circuits Wireless TP application.
+This release is the cleaned GitHub-ready build that incorporates the tested work from v2.6.3 through v2.6.25, including the complete Level Monitor decoder.
+
+## Tested Coach and Scope
+
+This integration was reverse engineered from a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
+
+Different Precision Plex-equipped coaches may expose different numbers of slides, lights, tanks, relays, and sensors. The protocol documentation in `/docs` is intended to help other owners adapt the integration to their specific coach configuration.
 
 ## Project Vision
 
 This project began as a Home Assistant integration for monitoring Precision Plex state.
 
-Beginning around the v1.7.x series, the project direction changed from simple monitoring to a more ambitious goal:
-
-> Replace the Precision Circuits Wireless TP mobile application with native Home Assistant entities.
-
-The current integration is designed to provide:
-
-- Real-time state monitoring
-- Bidirectional RV control
-- Home Assistant native lights, switches, covers, binary sensors, and number entities
-- Awning and slide position estimation
-- Wall-panel synchronization
-- Continuous Bluetooth Low Energy connectivity
-- Reduced dependency on the Precision Circuits Wireless TP mobile application
-
-## Test Environment
-
-This integration has been developed and validated on:
+The current direction is a native Home Assistant replacement for the Precision Circuits Wireless TP mobile application:
 
 ```text
-Precision Circuits Precision Plex
-Precision Circuits Wireless TP Monitor
-
-Primary Development Platform:
-2022 Forest River Georgetown GT5 34M5
+Precision Plex Controller
+        ⇅
+Wireless TP BLE Module
+        ⇅
+Home Assistant
 ```
 
-The decoded functions, state bits, and command packets currently implemented correspond to equipment installed on that coach.
+The integration provides:
 
-Precision Plex installations vary by manufacturer, model, year, and option package. Different coaches may expose different slide rooms, lighting zones, HVAC controls, generator controls, water systems, tank monitoring functions, and coach-specific accessories.
-
-The protocol appears to be largely shared across Precision Plex installations, but command mappings and available functions may vary by coach.
+- Persistent local BLE connectivity
+- Real-time Precision Plex status monitoring
+- Bidirectional control for supported circuits
+- Native Home Assistant lights, switches, covers, sensors, binary sensors, and number entities
+- Awning and slide position estimation
+- Complete Level Monitor telemetry for the tested coach
 
 ## Important Bluetooth Architecture Note
 
 The Precision Plex Wireless TP module appears to allow only one active BLE connection at a time.
 
-Because of this, the integration intentionally maintains a persistent Bluetooth connection while Home Assistant is running.
-
-This is required for:
-
-- Near real-time state notifications
-- Immediate wall-panel updates in Home Assistant
-- Reliable bidirectional synchronization
-- Fast command response
-- Cover and slide position estimation
-- Avoiding repeated BLE connection setup latency
-
-When Home Assistant is connected, the Precision Circuits iOS application may be unable to connect at the same time. This is expected behavior and is part of the Wireless TP module limitation.
+The integration intentionally maintains a persistent Bluetooth connection while Home Assistant is running. When Home Assistant is connected, the Precision Circuits iOS app may be unable to connect at the same time. This is expected behavior for the Wireless TP module.
 
 ## Current Stable Feature Set
 
-Tested and working as of v2.6.3:
+Tested and working as of **v2.6.26**:
 
 ### Controls
 
@@ -81,19 +57,25 @@ Tested and working as of v2.6.3:
 - `cover.wardrobe_slide`
 - `cover.sofa_slide`
 
+### Level Monitor Sensors
+
+Decoded from handle `0x002B` / characteristic `02AA`:
+
+- `sensor.coach_battery`
+- `sensor.fresh_water_tank`
+- `sensor.grey_water_tank`
+- `sensor.black_water_tank`
+- `sensor.lp_gas_tank`
+
 ### Status / Movement Sensors
 
 - Awning light state
 - Water pump state
 - Water heater state
-- Awning extending
-- Awning retracting
-- Bed slide extending
-- Bed slide retracting
-- Wardrobe slide extending
-- Wardrobe slide retracting
-- Sofa slide extending
-- Sofa slide retracting
+- Awning extending/retracting
+- Bed slide extending/retracting
+- Wardrobe slide extending/retracting
+- Sofa slide extending/retracting
 
 ### Configurable Travel-Time Settings
 
@@ -110,20 +92,25 @@ Travel times are exposed as Home Assistant Number entities:
 
 These values are editable from Home Assistant and persist across restarts.
 
-They control automatic runtime safety limits, position estimation speed, and set-position movement timing.
+## Level Monitor Decoder
 
-Current defaults:
+The Level Monitor page is decoded from the `02AA` telemetry packet, observed at handle `0x002B`.
 
-| Entity | Default |
-|---|---:|
-| Awning Open Seconds | 18 seconds |
-| Awning Close Seconds | 25 seconds |
-| Bed Slide Open Seconds | 28 seconds |
-| Bed Slide Close Seconds | 24 seconds |
-| Wardrobe Slide Open Seconds | 18 seconds |
-| Wardrobe Slide Close Seconds | 17 seconds |
-| Sofa Slide Open Seconds | 32 seconds |
-| Sofa Slide Close Seconds | 28 seconds |
+Example payload:
+
+```text
+00 83 06 3F 3F 50 ...
+```
+
+Known fields:
+
+| Field | Source | Mapping |
+|---|---|---|
+| Coach Battery | bytes 0-1, big-endian tenths of volts | `0x0083` = 13.1 V |
+| Fresh Water | byte 2 low nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
+| Grey Water | byte 3 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
+| Black Water | byte 4 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
+| LP Gas | byte 5 high nibble | `0=0%`, `2=25%`, `5=50%`, `7=75%`, `A=100%` |
 
 ## Installation
 
@@ -138,7 +125,7 @@ Current defaults:
 
 ### Manual Installation
 
-Copy the integration folder into Home Assistant:
+Copy this folder into Home Assistant:
 
 ```text
 config/custom_components/precision_plex
@@ -168,26 +155,13 @@ This integration can control physical RV equipment.
 
 Use care when testing:
 
-- Confirm the awning path is clear
-- Confirm slide rooms have clearance
-- Keep visual contact with moving equipment
-- Use Stop immediately if motion is unexpected
-- Verify travel-time settings before relying on full-open or full-close automation
+- Confirm the awning path is clear.
+- Confirm slide rooms have clearance.
+- Keep visual contact with moving equipment.
+- Use Stop immediately if motion is unexpected.
+- Verify travel-time settings before relying on full-open or full-close automation.
 
 The integration includes timed safety limits for covers, but it does not replace operator awareness.
-
-## Planned / Future Work
-
-Likely next targets:
-
-- Sofa Slide
-- Sofa Slide
-- Additional Wireless TP functions
-- Dashboard examples
-- Better diagnostics
-- Expanded protocol documentation
-
-The long-term goal is a complete native Home Assistant replacement for the Precision Circuits Wireless TP app.
 
 ## Reference Calibrations
 
@@ -200,25 +174,26 @@ These travel times were validated on a Precision Plex system installed in a **20
 | Wardrobe Slide | 18 seconds | 17 seconds |
 | Sofa Slide | 32 seconds | 28 seconds |
 
-Travel times vary by coach, slide mechanism, battery voltage, maintenance condition, and motor wear. These values are reference calibrations for this specific Georgetown GT5 34M5 installation and can be adjusted through the Home Assistant Number entities without modifying the integration.
-
+Travel times vary by coach, slide mechanism, battery voltage, maintenance condition, and motor wear. These values can be adjusted through the Home Assistant Number entities without modifying the integration.
 
 ## Restore Cover Positions After Restart
 
 Cover entities restore their last Home Assistant-known estimated position after Home Assistant restarts or the integration reloads.
 
-This applies to:
-
-- Awning
-- Bed Slide
-- Wardrobe Slide
-- Sofa Slide
-
 The restored value is still an estimate. If the awning or slides are moved while Home Assistant is offline, the restored position may be stale until recalibrated or moved again through Home Assistant while connected.
-
 
 ## Clean Disable / Enable Lifecycle
 
 The integration can be disabled and re-enabled from Home Assistant without requiring a full Home Assistant restart.
 
 During unload, the integration stops the persistent BLE coordinator, cancels and awaits the BLE monitor task, disconnects the BLE client, removes stale startup callbacks, clears listeners, and unloads platforms cleanly.
+
+## Planned / Future Work
+
+Likely next targets:
+
+- Generator status / generator hours
+- Additional lighting circuits
+- Additional coach-specific Precision Plex functions
+- Dashboard examples
+- Expanded protocol documentation

@@ -3,7 +3,7 @@
 from homeassistant.const import CONF_ADDRESS
 
 DOMAIN = "precision_plex"
-PLATFORMS = ["binary_sensor", "light", "switch", "cover", "number"]
+PLATFORMS = ["binary_sensor", "light", "switch", "cover", "number", "sensor"]
 
 DEFAULT_TARGET_ADDRESS = "80:4B:50:D2:44:B4"
 TARGET_SERVICE_UUID = "00726f62-6f74-7061-6a61-6d61732e6361"
@@ -12,6 +12,13 @@ PAIRING_CHARACTERISTIC_UUID = "01556963-6172-6173-6f6c-7574696f6e73"
 PAIRING_INIT_PAYLOAD = bytes.fromhex("06")
 
 STATE_CHARACTERISTIC_UUID = "02bb6f62-6f74-7061-6a61-6d61732e6361"
+
+# Wireless TP monitor telemetry characteristic.
+# Observed value handle 0x002B carries coach battery voltage in tenths of a volt.
+BATTERY_CHARACTERISTIC_UUID = "02aa6f62-6f74-7061-6a61-6d61732e6361"
+
+# Live monitor notification handles observed from Wireless TP traces.
+COACH_BATTERY_NOTIFY_HANDLE = 0x002B
 
 STATE_BITS = {
     "awning_light": {

@@ -6,10 +6,10 @@ The Precision Plex Wireless TP module exposes BLE characteristics used by the mo
 
 The integration uses the same communication path:
 
-1. Subscribe to state notifications.
-2. Decode state words from the notification payload.
-3. Send command packets to the control characteristic.
-4. Update Home Assistant entities from notifications and command results.
+1. Subscribe to state and level notifications.
+2. Decode state words and level-monitor bytes from notification payloads.
+3. Send command packets to the control characteristic for supported controls.
+4. Update Home Assistant entities from BLE notifications and command results.
 
 ## Conceptual Path
 
@@ -23,7 +23,15 @@ Wireless TP Module
 Home Assistant
 ```
 
-## Packet Pattern
+## Important Characteristics
+
+| Purpose | Characteristic | Observed Handle | Notes |
+|---|---|---:|---|
+| Control writes | `03726f62-6f74-7061-6a61-6d61732e6361` | varies by stack / app traces | Used for button/control commands |
+| State/status | `02bb6f62-6f74-7061-6a61-6d61732e6361` | observed `0x002F` / related notify stream | Wall-panel and circuit status words |
+| Level monitor | `02aa6f62-6f74-7061-6a61-6d61732e6361` | `0x002B` | Coach battery and tank levels |
+
+## Command Packet Pattern
 
 Several command families follow this general structure:
 
@@ -31,7 +39,7 @@ Several command families follow this general structure:
 55 1D 10 0B [function id] [action] 00 00 00 00 00 00 [checksum]
 ```
 
-For momentary/toggle devices, a single command packet is sent.
+For momentary/toggle devices, the app sends a short button-action sequence.
 
 For movement devices such as awnings and slides, the mobile app sends:
 
@@ -41,27 +49,28 @@ For movement devices such as awnings and slides, the mobile app sends:
 
 Home Assistant mirrors this behavior.
 
+## Level Monitor Packet
+
+The Level Monitor page is decoded from `02AA`, observed at handle `0x002B`.
+
+Example:
+
+```text
+00 83 06 3F 3F 50 ...
+```
+
+Known fields:
+
+| Field | Source | Mapping |
+|---|---|---|
+| Coach Battery | bytes 0-1, big-endian tenths of volts | `0x0083` = 13.1 V |
+| Fresh Water | byte 2 low nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
+| Grey Water | byte 3 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
+| Black Water | byte 4 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
+| LP Gas | byte 5 high nibble | `0=0%`, `2=25%`, `5=50%`, `7=75%`, `A=100%` |
+
 ## Coach Variability
 
 The protocol appears largely shared across Precision Plex installations, but function IDs, state bits, and available features may vary by coach.
 
-
-## Tested Coach and Scope
-
 This integration was reverse engineered from a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
-
-Different Precision Plex equipped coaches may expose different numbers of slides, lights, tanks, relays, and sensors. The protocol documentation in `/docs` is intended to help other owners adapt the integration to their specific coach configuration.
-
-
-## Reference Calibrations
-
-These travel times were validated on a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
-
-| Device | Open / Out | Close / In |
-|---|---:|---:|
-| Awning | 18 seconds | 25 seconds |
-| Bed Slide | 28 seconds | 24 seconds |
-| Wardrobe Slide | 18 seconds | 17 seconds |
-| Sofa Slide | 32 seconds | 28 seconds |
-
-Travel times vary by coach, slide mechanism, battery voltage, maintenance condition, and motor wear. These values are reference calibrations for this specific Georgetown GT5 34M5 installation and can be adjusted through the Home Assistant Number entities without modifying the integration.

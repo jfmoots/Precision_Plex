@@ -1,31 +1,68 @@
 # Release History
 
-## v1.0.0
+## v2.6.26 - Level Monitor Complete / GitHub Ready
 
-Initial working awning light control.
+- Cleaned and consolidated the tested releases from v2.6.3 through v2.6.25.
+- Marks v2.6.26 as the current recommended GitHub-ready release.
+- Includes confirmed Level Monitor telemetry:
+  - Coach Battery
+  - Fresh Water Tank
+  - Grey Water Tank
+  - Black Water Tank
+  - LP Gas Tank
+- Documents the confirmed `02AA` / handle `0x002B` nibble model.
+- Keeps the tested control stack for awning light, water pump, water heater, awning, bed slide, wardrobe slide, and sofa slide.
 
-## v1.5.0
+## v2.6.25 - LP Gas Level Test
 
-Added early wall-switch synchronization support.
+- Added LP Gas Tank sensor from the confirmed `0x002B` / `02AA` levels packet.
+- LP Gas mapping: `0=0%`, `2=25%`, `5=50%`, `7=75%`, `A=100%`.
 
-## v1.7.0
+## v2.6.24 - Tank Model Complete Test
 
-Added water pump support.
+- Added Black Water Tank sensor from the `0x002B` / `02AA` levels packet.
+- Completed Fresh/Grey/Black tank nibble model.
 
-## v1.7.1
+## v2.6.23 - Fresh Nibble + Grey Tank Test
 
-Stable BLE baseline using short-lived BLE sessions.
+- Corrected Fresh Water to low-nibble decoding.
+- Added Grey Water Tank sensor.
 
-This represented the final strong version of the original coexistence approach.
+## v2.6.22 - Fresh Tank 02AA Decoder Test
 
-## v2.4.1
+- Added Fresh Water Tank sensor decoded from `02AA` / handle `0x002B`.
+- Confirmed Fresh mapping: `0=0%`, `3=33%`, `6=67%`, `A=100%`.
+- Retained coach battery voltage decoder.
 
-Wireless TP replacement baseline.
+## v2.6.3 - Stable Control Baseline
 
-Major shift to persistent BLE connection, bidirectional synchronization, awning cover, bed slide cover, position estimation, wall-panel tracking, and configurable travel times.
+- Stable persistent BLE coordinator baseline.
+- Clean disable / enable lifecycle.
+- Working awning light, water pump, water heater, awning, bed slide, wardrobe slide, sofa slide, binary sensors, and travel-time settings.
 
 ## v2.4.2
 
-Documentation and protocol reference expansion.
+- Documentation and protocol reference expansion.
+- Added structured documentation under `/docs`, HACS metadata, repository URLs, and Georgetown GT5 34M5 reference platform notes.
 
-Adds structured documentation under `/docs`, updates README, adds HACS metadata, fixes repository URLs, and documents the Georgetown GT5 34M5 reference platform.
+## v2.4.1
+
+- Wireless TP replacement baseline.
+- Major shift to persistent BLE connection, bidirectional synchronization, covers, position estimation, wall-panel tracking, and configurable travel times.
+
+## v1.7.1
+
+- Stable BLE baseline using short-lived BLE sessions.
+- Final strong version of the original coexistence approach.
+
+## v1.7.0
+
+- Added water pump support.
+
+## v1.5.0
+
+- Added early wall-switch synchronization support.
+
+## v1.0.0
+
+- Initial working awning light control.
