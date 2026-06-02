@@ -190,10 +190,12 @@ During unload, the integration stops the persistent BLE coordinator, cancels and
 
 ## Planned / Future Work
 
-Likely next targets:
+Future Work
 
-- Generator status / generator hours
-- Additional lighting circuits
-- Additional coach-specific Precision Plex functions
+- Generator telemetry and control
+- Fault and warning message decoding
+- Native slide status telemetry
+- Native awning status telemetry
+- Additional coach-specific functions
 - Dashboard examples
 - Expanded protocol documentation
