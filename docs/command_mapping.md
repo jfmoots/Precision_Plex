@@ -190,3 +190,40 @@ Status: Verified
 
 Status: Verified shared movement stop command
 
+
+
+## Generator Commands
+
+Generator commands are written to handle `0x0037` in the captured mobile app traces.
+
+### Generator Start Press
+
+```text
+55 1D 10 0B 00 3E 02 00 00 00 00 00 00 00 00 33
+```
+
+Status: Verified
+
+### Generator Stop Press
+
+```text
+55 1D 10 0B 00 3E 03 00 00 00 00 00 00 00 00 32
+```
+
+Status: Verified
+
+### Generator Release / Neutral
+
+```text
+55 1D 10 0B 00 3F 00 00 00 00 00 00 00 00 00 34
+```
+
+Status: Verified
+
+### Generator Safety Interlocks
+
+Home Assistant only allows Generator Start when live generator telemetry says the generator is not running.
+
+Home Assistant only allows Generator Stop when live generator telemetry says the generator is running.
+
+Both commands are blocked when generator telemetry is unknown or unavailable.

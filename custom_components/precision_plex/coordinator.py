@@ -62,6 +62,10 @@ class PrecisionPlexStateCoordinator:
         self.raw_black_level: int | None = None
         self.lp_gas_level: int | None = None
         self.raw_lp_level: int | None = None
+        self.generator_running: bool | None = None
+        self.generator_runtime_hours: float | None = None
+        self.raw_generator_status: int | None = None
+        self.raw_generator_runtime_tenths: int | None = None
         self.available = False
 
         self._client: BleakClientWithServiceCache | None = None
@@ -117,6 +121,10 @@ class PrecisionPlexStateCoordinator:
         self.raw_black_level = None
         self.lp_gas_level = None
         self.raw_lp_level = None
+        self.generator_running = None
+        self.generator_runtime_hours = None
+        self.raw_generator_status = None
+        self.raw_generator_runtime_tenths = None
         self.raw_battery_state = None
         self._notify_listeners()
         self._listeners.clear()
@@ -625,8 +633,24 @@ class PrecisionPlexStateCoordinator:
                     raw_lp,
                 )
 
+        if len(raw) >= 9:
+            # Controlled Generator app captures from 2026-06-03:
+            #   00 83 00 0F 0F 50 00 04 B4... -> Generator stopped, 120.4 hours
+            #   00 88 00 0F 0F 50 10 04 B4... -> Generator running, 120.4 hours
+            # Generator running flag is bit 0x10 of byte index 6.
+            # Generator run time is bytes 7-8, big-endian tenths of hours.
+            raw_generator_status = raw[6]
+            raw_generator_runtime_tenths = int.from_bytes(raw[7:9], "big")
+
+            self.raw_generator_status = raw_generator_status
+            self.generator_running = bool(raw_generator_status & 0x10)
+            self.raw_generator_runtime_tenths = raw_generator_runtime_tenths
+            self.generator_runtime_hours = raw_generator_runtime_tenths / 10
+            self.raw_battery_state = raw
+            self.available = True
+
         _LOGGER.debug(
-            "Precision Plex 02AA decoded from %s sender=%s raw=%s coach_voltage=%s fresh_water_level=%s raw_fresh=%s grey_water_level=%s raw_grey=%s black_water_level=%s raw_black=%s lp_gas_level=%s raw_lp=%s",
+            "Precision Plex 02AA decoded from %s sender=%s raw=%s coach_voltage=%s fresh_water_level=%s raw_fresh=%s grey_water_level=%s raw_grey=%s black_water_level=%s raw_black=%s lp_gas_level=%s raw_lp=%s generator_running=%s generator_runtime_hours=%s raw_generator_status=%s raw_generator_runtime_tenths=%s",
             source,
             f"0x{sender:04X}" if isinstance(sender, int) else None,
             raw.hex(" "),
@@ -639,6 +663,10 @@ class PrecisionPlexStateCoordinator:
             f"0x{self.raw_black_level:X}" if isinstance(self.raw_black_level, int) else None,
             self.lp_gas_level,
             f"0x{self.raw_lp_level:X}" if isinstance(self.raw_lp_level, int) else None,
+            self.generator_running,
+            self.generator_runtime_hours,
+            f"0x{self.raw_generator_status:02X}" if isinstance(self.raw_generator_status, int) else None,
+            self.raw_generator_runtime_tenths,
         )
 
         if not self.hass.loop.is_closed():

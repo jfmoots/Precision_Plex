@@ -3,7 +3,7 @@
 from homeassistant.const import CONF_ADDRESS
 
 DOMAIN = "precision_plex"
-PLATFORMS = ["binary_sensor", "light", "switch", "cover", "number", "sensor"]
+PLATFORMS = ["binary_sensor", "button", "light", "switch", "cover", "number", "sensor"]
 
 DEFAULT_TARGET_ADDRESS = "80:4B:50:D2:44:B4"
 TARGET_SERVICE_UUID = "00726f62-6f74-7061-6a61-6d61732e6361"
@@ -181,3 +181,26 @@ SOFA_SLIDE_IN_RELEASE = bytes.fromhex(
 SOFA_SLIDE_IN_HOLD = bytes.fromhex(
     "55 1D 10 0B 00 0F 00 01 00 00 00 00 00 00 00 63"
 )
+
+
+# Generator momentary command packets captured from the Precision iOS app.
+# Safety interlocks are implemented in button.py using live generator_running telemetry.
+GENERATOR_START_PRESS = bytes.fromhex(
+    "55 1D 10 0B 00 3E 02 00 00 00 00 00 00 00 00 33"
+)
+GENERATOR_STOP_PRESS = bytes.fromhex(
+    "55 1D 10 0B 00 3E 03 00 00 00 00 00 00 00 00 32"
+)
+GENERATOR_RELEASE = bytes.fromhex(
+    "55 1D 10 0B 00 3F 00 00 00 00 00 00 00 00 00 34"
+)
+
+GENERATOR_START_SEQUENCE = [
+    GENERATOR_START_PRESS,
+    GENERATOR_RELEASE,
+]
+
+GENERATOR_STOP_SEQUENCE = [
+    GENERATOR_STOP_PRESS,
+    GENERATOR_RELEASE,
+]

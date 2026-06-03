@@ -21,12 +21,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up Precision Plex binary sensors."""
     coordinator: PrecisionPlexStateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            PrecisionPlexStateBinarySensor(coordinator, entry, key, description)
-            for key, description in STATE_BITS.items()
-        ]
-    )
+    entities = [
+        PrecisionPlexStateBinarySensor(coordinator, entry, key, description)
+        for key, description in STATE_BITS.items()
+    ]
+    entities.append(PrecisionPlexGeneratorRunningBinarySensor(coordinator, entry))
+    async_add_entities(entities)
 
 
 class PrecisionPlexStateBinarySensor(BinarySensorEntity):
@@ -114,4 +114,74 @@ class PrecisionPlexStateBinarySensor(BinarySensorEntity):
                 if self.coordinator.raw_state is not None
                 else None
             ),
+        }
+
+
+class PrecisionPlexGeneratorRunningBinarySensor(BinarySensorEntity):
+    """Generator running status decoded from Precision Plex 02AA telemetry."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Generator Running"
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
+
+    def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
+        """Initialize sensor."""
+        self.coordinator = coordinator
+        self.entry = entry
+        self._attr_unique_id = f"{coordinator.address}_generator_running"
+        self._remove_listener = None
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to coordinator updates."""
+        self._remove_listener = self.coordinator.async_add_listener(
+            self._handle_coordinator_update
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unsubscribe from coordinator updates."""
+        if self._remove_listener is not None:
+            self._remove_listener()
+            self._remove_listener = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated BLE state."""
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return decoded generator running state."""
+        return self.coordinator.generator_running
+
+    @property
+    def available(self) -> bool:
+        """Return availability."""
+        return self.coordinator.available and self.coordinator.generator_running is not None
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
+            "name": self.entry.title,
+            "manufacturer": "Precision Circuits",
+            "model": "Precision Plex Wireless TP Monitor",
+        }
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return diagnostic attributes."""
+        raw = self.coordinator.raw_battery_state
+        return {
+            "source_handle": "0x002B",
+            "source_characteristic": "02AA",
+            "source_field": "byte 6 bit 0x10",
+            "raw_generator_status": (
+                f"0x{self.coordinator.raw_generator_status:02X}"
+                if isinstance(self.coordinator.raw_generator_status, int)
+                else None
+            ),
+            "raw_02aa": raw.hex(" ") if raw is not None else None,
+            "mapping": "0x00=stopped, 0x10=running",
         }

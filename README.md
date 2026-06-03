@@ -4,15 +4,15 @@ A custom Home Assistant integration for Precision Circuits Precision Plex system
 
 ## Current Recommended Release
 
-**v2.6.26** is the current recommended release.
+**v2.6.29** is the current GitHub-ready release.
 
-This release is the cleaned GitHub-ready build that incorporates the tested work from v2.6.3 through v2.6.25, including the complete Level Monitor decoder.
+This release consolidates the tested work from v2.6.3 through v2.6.28 and adds confirmed generator telemetry and guarded generator Start/Stop control.
 
 ## Tested Coach and Scope
 
 This integration was reverse engineered from a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
 
-Different Precision Plex-equipped coaches may expose different numbers of slides, lights, tanks, relays, and sensors. The protocol documentation in `/docs` is intended to help other owners adapt the integration to their specific coach configuration.
+Different Precision Plex-equipped coaches may expose different numbers of slides, lights, tanks, relays, sensors, generator functions, and accessories. The protocol documentation in `/docs` is intended to help other owners adapt the integration to their specific coach configuration.
 
 ## Project Vision
 
@@ -24,7 +24,7 @@ The current direction is a native Home Assistant replacement for the Precision C
 Precision Plex Controller
         ⇅
 Wireless TP BLE Module
-        ⇅
+        ⇅ BLE
 Home Assistant
 ```
 
@@ -33,9 +33,10 @@ The integration provides:
 - Persistent local BLE connectivity
 - Real-time Precision Plex status monitoring
 - Bidirectional control for supported circuits
-- Native Home Assistant lights, switches, covers, sensors, binary sensors, and number entities
+- Native Home Assistant light, switch, cover, sensor, binary sensor, button, and number entities
 - Awning and slide position estimation
 - Complete Level Monitor telemetry for the tested coach
+- Generator running status, runtime telemetry, and guarded generator Start/Stop control
 
 ## Important Bluetooth Architecture Note
 
@@ -45,13 +46,15 @@ The integration intentionally maintains a persistent Bluetooth connection while 
 
 ## Current Stable Feature Set
 
-Tested and working as of **v2.6.26**:
+Tested and working as of **v2.6.29**:
 
 ### Controls
 
 - `light.awning_light`
 - `switch.water_pump`
 - `switch.water_heater`
+- `button.generator_start`
+- `button.generator_stop`
 - `cover.awning`
 - `cover.bed_slide`
 - `cover.wardrobe_slide`
@@ -66,12 +69,16 @@ Decoded from handle `0x002B` / characteristic `02AA`:
 - `sensor.grey_water_tank`
 - `sensor.black_water_tank`
 - `sensor.lp_gas_tank`
+- `binary_sensor.generator_running`
+- `sensor.generator_runtime`
 
 ### Status / Movement Sensors
 
 - Awning light state
 - Water pump state
 - Water heater state
+- Generator running state
+- Generator runtime hours
 - Awning extending/retracting
 - Bed slide extending/retracting
 - Wardrobe slide extending/retracting
@@ -92,14 +99,14 @@ Travel times are exposed as Home Assistant Number entities:
 
 These values are editable from Home Assistant and persist across restarts.
 
-## Level Monitor Decoder
+## Level Monitor and Generator Decoder
 
-The Level Monitor page is decoded from the `02AA` telemetry packet, observed at handle `0x002B`.
+The Level Monitor and generator telemetry are decoded from the `02AA` telemetry packet, observed at handle `0x002B`.
 
 Example payload:
 
 ```text
-00 83 06 3F 3F 50 ...
+00 83 06 3F 3F 50 10 04 B5 ...
 ```
 
 Known fields:
@@ -111,6 +118,26 @@ Known fields:
 | Grey Water | byte 3 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
 | Black Water | byte 4 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
 | LP Gas | byte 5 high nibble | `0=0%`, `2=25%`, `5=50%`, `7=75%`, `A=100%` |
+| Generator Running | byte 6 bit `0x10` | `0x00=stopped`, `0x10=running` |
+| Generator Runtime | bytes 7-8, big-endian tenths of hours | `0x04B5` = 120.5 hours |
+
+## Generator Control
+
+Generator Start and Stop are implemented as guarded momentary button entities.
+
+The integration blocks unsafe or redundant commands:
+
+- Start is only allowed when live telemetry says the generator is not running.
+- Stop is only allowed when live telemetry says the generator is running.
+- Both commands are blocked when generator state is unknown or unavailable.
+
+Confirmed command packets are written to the control characteristic / handle `0x0037` in app captures:
+
+```text
+Start press: 55 1D 10 0B 00 3E 02 00 00 00 00 00 00 00 00 33
+Stop press:  55 1D 10 0B 00 3E 03 00 00 00 00 00 00 00 00 32
+Release:     55 1D 10 0B 00 3F 00 00 00 00 00 00 00 00 00 34
+```
 
 ## Installation
 
@@ -157,11 +184,12 @@ Use care when testing:
 
 - Confirm the awning path is clear.
 - Confirm slide rooms have clearance.
+- Confirm generator operating conditions are safe before starting or stopping it.
 - Keep visual contact with moving equipment.
 - Use Stop immediately if motion is unexpected.
 - Verify travel-time settings before relying on full-open or full-close automation.
 
-The integration includes timed safety limits for covers, but it does not replace operator awareness.
+The integration includes timed safety limits for covers and generator command interlocks, but it does not replace operator awareness.
 
 ## Reference Calibrations
 
@@ -190,12 +218,12 @@ During unload, the integration stops the persistent BLE coordinator, cancels and
 
 ## Planned / Future Work
 
-Future Work
+Likely next targets:
 
-- Generator telemetry and control
-- Fault and warning message decoding
-- Native slide status telemetry
-- Native awning status telemetry
-- Additional coach-specific functions
+- Generator fault decoding
+- Generator maintenance information
+- Native slide position telemetry
+- Native awning position telemetry
+- Additional coach-specific Precision Plex functions
 - Dashboard examples
 - Expanded protocol documentation

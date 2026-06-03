@@ -1,9 +1,33 @@
 # Release History
 
+## v2.6.29 - Generator Control & Complete Coach Monitoring
+
+- Current GitHub-ready release.
+- Consolidates tested work from v2.6.3 through v2.6.28.
+- Adds confirmed Generator Start and Generator Stop buttons.
+- Adds generator command safety interlocks using live generator running telemetry.
+- Confirms generator running status and runtime hours from the `0x002B` / `02AA` status packet.
+- Confirms runtime updates live with the Precision Plex display.
+- Keeps Fresh, Grey, Black, LP Gas, Coach Battery, water pump, water heater, awning, and slide functionality unchanged.
+
+## v2.6.28 - Generator Control Test
+
+- Added guarded Generator Start and Generator Stop buttons.
+- Added safety interlocks using live generator running telemetry.
+- Start is blocked while running.
+- Stop is blocked while stopped.
+- Both commands are blocked if generator state is unknown.
+
+## v2.6.27 - Generator Telemetry Test
+
+- Adds Generator Running binary sensor from the confirmed `0x002B` / `02AA` status packet.
+- Adds Generator Runtime sensor decoded from bytes 7-8 as big-endian tenths of hours.
+- Confirmed example: `0x04B4` = 120.4 hours.
+- Keeps the existing Fresh, Grey, Black, LP Gas, and Coach Battery decoders unchanged.
+
 ## v2.6.26 - Level Monitor Complete / GitHub Ready
 
 - Cleaned and consolidated the tested releases from v2.6.3 through v2.6.25.
-- Marks v2.6.26 as the current recommended GitHub-ready release.
 - Includes confirmed Level Monitor telemetry:
   - Coach Battery
   - Fresh Water Tank

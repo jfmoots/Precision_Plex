@@ -18,13 +18,37 @@ Precision Circuits Wireless TP Monitor
 - Awning Light
 - Water Pump
 - Water Heater
+- Generator Start
+- Generator Stop
+- Generator Running telemetry
+- Generator Runtime telemetry
+- Coach Battery telemetry
+- Fresh Water Tank telemetry
+- Grey Water Tank telemetry
+- Black Water Tank telemetry
+- LP Gas telemetry
 - Awning Extend
 - Awning Retract
 - Bed Slide Extend
 - Bed Slide Retract
+- Wardrobe Slide Extend
+- Wardrobe Slide Retract
+- Sofa Slide Extend
+- Sofa Slide Retract
 - Position estimation
 - Wall-panel tracking
 - Bidirectional synchronization
+
+## Validation Methods
+
+The project used:
+
+- Precision Plex wall panel observation
+- Precision Plex iOS app observation
+- Bluetooth PacketLogger captures
+- Controlled tank probe jumper testing
+- Home Assistant log validation
+- Live Home Assistant entity testing
 
 ## Coach-Specific Notes
 

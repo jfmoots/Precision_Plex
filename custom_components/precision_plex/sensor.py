@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfElectricPotential
+from homeassistant.const import PERCENTAGE, UnitOfElectricPotential, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -27,6 +27,7 @@ async def async_setup_entry(
             PrecisionPlexGreyWaterTankSensor(coordinator, entry),
             PrecisionPlexBlackWaterTankSensor(coordinator, entry),
             PrecisionPlexLPGasTankSensor(coordinator, entry),
+            PrecisionPlexGeneratorRuntimeSensor(coordinator, entry),
         ]
     )
 
@@ -271,4 +272,42 @@ class PrecisionPlexLPGasTankSensor(PrecisionPlexBaseSensor):
             "source_field": "byte 5 high nibble",
             "raw_02aa": raw.hex(" ") if raw is not None else None,
             "mapping": "0x0=0%, 0x2=25%, 0x5=50%, 0x7=75%, 0xA=100%",
+        }
+
+
+class PrecisionPlexGeneratorRuntimeSensor(PrecisionPlexBaseSensor):
+    """Generator runtime decoded from Precision Plex 02AA telemetry."""
+
+    _attr_name = "Generator Runtime"
+    _attr_native_unit_of_measurement = UnitOfTime.HOURS
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:timer-outline"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the generator runtime sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_generator_runtime"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return generator runtime hours."""
+        return self.coordinator.generator_runtime_hours
+
+    @property
+    def available(self) -> bool:
+        """Return availability."""
+        return self.coordinator.available and self.coordinator.generator_runtime_hours is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | int | None]:
+        """Return diagnostic attributes."""
+        raw = self.coordinator.raw_battery_state
+        return {
+            "source_handle": "0x002B",
+            "source_characteristic": "02AA",
+            "source_field": "bytes 7-8 big-endian tenths of hours",
+            "raw_runtime_tenths": self.coordinator.raw_generator_runtime_tenths,
+            "raw_02aa": raw.hex(" ") if raw is not None else None,
+            "mapping": "0x04B4=1204 tenths=120.4 hours",
         }
