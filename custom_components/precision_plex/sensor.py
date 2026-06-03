@@ -28,6 +28,7 @@ async def async_setup_entry(
             PrecisionPlexBlackWaterTankSensor(coordinator, entry),
             PrecisionPlexLPGasTankSensor(coordinator, entry),
             PrecisionPlexGeneratorRuntimeSensor(coordinator, entry),
+            PrecisionPlexGeneratorStatusSensor(coordinator, entry),
         ]
     )
 
@@ -310,4 +311,50 @@ class PrecisionPlexGeneratorRuntimeSensor(PrecisionPlexBaseSensor):
             "raw_runtime_tenths": self.coordinator.raw_generator_runtime_tenths,
             "raw_02aa": raw.hex(" ") if raw is not None else None,
             "mapping": "0x04B4=1204 tenths=120.4 hours",
+        }
+
+
+class PrecisionPlexGeneratorStatusSensor(PrecisionPlexBaseSensor):
+    """Generator status decoded from Precision Plex 02AA telemetry."""
+
+    _attr_name = "Generator Status"
+    _attr_icon = "mdi:generator-stationary"
+
+    def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the generator status sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_generator_status"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return decoded generator status text."""
+        return self.coordinator.generator_status
+
+    @property
+    def available(self) -> bool:
+        """Return availability."""
+        return self.coordinator.available and self.coordinator.generator_status is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | int | bool | None]:
+        """Return diagnostic attributes."""
+        raw = self.coordinator.raw_battery_state
+        return {
+            "source_handle": "0x002B",
+            "source_characteristic": "02AA",
+            "source_field": "bytes 6-7 generator status/transition word",
+            "generator_running": self.coordinator.generator_running,
+            "generator_status_key": self.coordinator.generator_status_key,
+            "raw_generator_status": (
+                f"0x{self.coordinator.raw_generator_status:02X}"
+                if isinstance(self.coordinator.raw_generator_status, int)
+                else None
+            ),
+            "raw_generator_status_word": (
+                f"0x{self.coordinator.raw_generator_status_word:04X}"
+                if isinstance(self.coordinator.raw_generator_status_word, int)
+                else None
+            ),
+            "raw_02aa": raw.hex(" ") if raw is not None else None,
+            "mapping": "0004=Stopped, 1004=Running, 00A0=AutoStart Accepted, 2004=Will Not Start, 6004=Performing Generator AutoStart, 7004=Performing Generator AutoStop",
         }

@@ -14,6 +14,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DOMAIN,
+    GENERATOR_AUTO_START_SEQUENCE,
+    GENERATOR_AUTO_STOP_SEQUENCE,
     GENERATOR_START_SEQUENCE,
     GENERATOR_STOP_SEQUENCE,
 )
@@ -26,14 +28,26 @@ GENERATOR_BUTTONS = {
     "generator_start": {
         "name": "Generator Start",
         "sequence": GENERATOR_START_SEQUENCE,
-        "allowed_running_state": False,
-        "blocked_message": "Generator start skipped because generator is already running or state is unknown",
+        "allowed_status_keys": {"stopped"},
+        "blocked_message": "Generator start skipped because generator is not stopped or state is unknown",
     },
     "generator_stop": {
         "name": "Generator Stop",
         "sequence": GENERATOR_STOP_SEQUENCE,
-        "allowed_running_state": True,
-        "blocked_message": "Generator stop skipped because generator is already stopped or state is unknown",
+        "allowed_status_keys": {"running"},
+        "blocked_message": "Generator stop skipped because generator is not running or state is unknown",
+    },
+    "generator_auto_start": {
+        "name": "Generator AutoStart",
+        "sequence": GENERATOR_AUTO_START_SEQUENCE,
+        "allowed_status_keys": {"stopped"},
+        "blocked_message": "Generator AutoStart skipped because generator is not stopped or state is unknown",
+    },
+    "generator_auto_stop": {
+        "name": "Generator AutoStop",
+        "sequence": GENERATOR_AUTO_STOP_SEQUENCE,
+        "allowed_status_keys": {"running"},
+        "blocked_message": "Generator AutoStop skipped because generator is not running or state is unknown",
     },
 }
 
@@ -95,8 +109,7 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
         """Only expose the button when telemetry confirms it is safe to press."""
         return (
             self.coordinator.available
-            and self.coordinator.generator_running
-            is self.cfg["allowed_running_state"]
+            and self.coordinator.generator_status_key in self.cfg["allowed_status_keys"]
         )
 
     @property
@@ -115,8 +128,10 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
         """Return diagnostic attributes."""
         return {
             "generator_running": self.coordinator.generator_running,
-            "safety_interlock": "state_aware",
-            "allowed_when_generator_running": self.cfg["allowed_running_state"],
+            "generator_status": self.coordinator.generator_status,
+            "generator_status_key": self.coordinator.generator_status_key,
+            "safety_interlock": "status_aware",
+            "allowed_status_keys": sorted(self.cfg["allowed_status_keys"]),
             "command_mode": "momentary_press_then_release",
             "press_payload": self.cfg["sequence"][0].hex(" "),
             "release_payload": self.cfg["sequence"][1].hex(" "),
@@ -125,7 +140,7 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
     async def async_press(self) -> None:
         """Send the momentary generator command when telemetry says it is safe."""
         async with self._command_lock:
-            if self.coordinator.generator_running is not self.cfg["allowed_running_state"]:
+            if self.coordinator.generator_status_key not in self.cfg["allowed_status_keys"]:
                 _LOGGER.warning("%s", self.cfg["blocked_message"])
                 return
 

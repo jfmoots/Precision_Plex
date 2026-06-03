@@ -1,5 +1,27 @@
 # Release History
 
+## v2.6.32 - GitHub Ready App-Visible Feature Complete Release
+
+- Promoted validated v2.6.31 generator work into a GitHub-ready release.
+- Updated README and docs to reflect that the tested coach's core app-visible Precision Plex feature set is complete.
+- Expanded protocol documentation for Level Monitor, LP, generator runtime, generator status, AutoStart, AutoStop, and Will Not Start.
+- Removed unavailable app features from the future-work target list for the tested coach.
+
+## v2.6.31 - Generator Will Not Start Status Test
+
+- Added Generator Status decoding for failed AutoStart state.
+- Maps 0x2004 / status byte 0x20 to `Will Not Start`.
+- Preserves v2.6.30 Generator AutoStart / AutoStop buttons and interlocks.
+- Unknown future generator status codes are exposed as unknown states and logged with raw 0x002B payloads.
+
+## v2.6.30 - Generator AutoStart / AutoStop Test
+
+- Added Generator AutoStart button.
+- Added Generator AutoStop button.
+- Added Generator Status sensor.
+- Added status-aware safety interlocks for all generator command buttons.
+- Decoded managed generator transition values observed in 0x002B / 02AA telemetry.
+
 ## v2.6.29 - Generator Control & Complete Coach Monitoring
 
 - Current GitHub-ready release.

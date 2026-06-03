@@ -20,8 +20,12 @@ Precision Circuits Wireless TP Monitor
 - Water Heater
 - Generator Start
 - Generator Stop
+- Generator AutoStart
+- Generator AutoStop
 - Generator Running telemetry
 - Generator Runtime telemetry
+- Generator Status telemetry
+- Generator Will Not Start status
 - Coach Battery telemetry
 - Fresh Water Tank telemetry
 - Grey Water Tank telemetry
@@ -47,8 +51,25 @@ The project used:
 - Precision Plex iOS app observation
 - Bluetooth PacketLogger captures
 - Controlled tank probe jumper testing
+- Controlled generator start/run/stop testing
+- Controlled failed AutoStart testing
 - Home Assistant log validation
 - Live Home Assistant entity testing
+
+## Feature Availability Notes
+
+The following items were checked and are not available in the Precision Plex mobile app for the reference coach:
+
+- HVAC / thermostat controls
+- Generator fault-code details beyond the decoded generator status field
+- Shore power telemetry
+- Inverter telemetry
+- Tank heater controls
+- Water heater telemetry
+- Native slide position telemetry
+- Native awning position telemetry
+
+Because those features are not exposed in the app for the reference coach, they are not part of the current target scope.
 
 ## Coach-Specific Notes
 
@@ -58,7 +79,6 @@ Different coaches may expose different:
 
 - Slide rooms
 - Lighting zones
-- HVAC controls
 - Generator controls
 - Water system controls
 - Tank monitoring functions

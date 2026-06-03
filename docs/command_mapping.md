@@ -227,3 +227,30 @@ Home Assistant only allows Generator Start when live generator telemetry says th
 Home Assistant only allows Generator Stop when live generator telemetry says the generator is running.
 
 Both commands are blocked when generator telemetry is unknown or unavailable.
+
+
+### Generator AutoStart Press
+
+```text
+55 1D 10 0B 00 3E 0A 00 00 00 00 00 00 00 00 2B
+```
+
+Status: Verified
+
+### Generator AutoStop Press
+
+```text
+55 1D 10 0B 00 3E 0B 00 00 00 00 00 00 00 00 2A
+```
+
+Status: Verified
+
+### Generator AutoStart / AutoStop Notes
+
+AutoStart and AutoStop are managed generator sequences, not persistent toggle modes. The Precision Plex controller primes and attempts the generator start/stop process. During failed AutoStart testing, the controller attempted four starts and then published the `Will Not Start` status.
+
+Safety interlocks match the normal Start/Stop controls:
+
+- AutoStart is only available when generator telemetry indicates the generator is not running.
+- AutoStop is only available when generator telemetry indicates the generator is running.
+- Both are blocked when generator telemetry is unknown or unavailable.

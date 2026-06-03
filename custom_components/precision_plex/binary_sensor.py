@@ -177,11 +177,18 @@ class PrecisionPlexGeneratorRunningBinarySensor(BinarySensorEntity):
             "source_handle": "0x002B",
             "source_characteristic": "02AA",
             "source_field": "byte 6 bit 0x10",
+            "generator_status": self.coordinator.generator_status,
+            "generator_status_key": self.coordinator.generator_status_key,
             "raw_generator_status": (
                 f"0x{self.coordinator.raw_generator_status:02X}"
                 if isinstance(self.coordinator.raw_generator_status, int)
                 else None
             ),
+            "raw_generator_status_word": (
+                f"0x{self.coordinator.raw_generator_status_word:04X}"
+                if isinstance(self.coordinator.raw_generator_status_word, int)
+                else None
+            ),
             "raw_02aa": raw.hex(" ") if raw is not None else None,
-            "mapping": "0x00=stopped, 0x10=running",
+            "mapping": "0x10=running; managed transitions exposed by Generator Status sensor",
         }

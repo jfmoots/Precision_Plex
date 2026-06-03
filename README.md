@@ -4,21 +4,32 @@ A custom Home Assistant integration for Precision Circuits Precision Plex system
 
 ## Current Recommended Release
 
-**v2.6.29** is the current GitHub-ready release.
+**v2.6.32** is the current GitHub-ready release.
 
-This release consolidates the tested work from v2.6.3 through v2.6.28 and adds confirmed generator telemetry and guarded generator Start/Stop control.
+This release promotes the validated v2.6.31 generator work into a cleaned, documented release package. For the tested coach, the integration now covers the core Precision Plex functions that are visible in the Precision Plex mobile app.
 
 ## Tested Coach and Scope
 
 This integration was reverse engineered from a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
 
-Different Precision Plex-equipped coaches may expose different numbers of slides, lights, tanks, relays, sensors, generator functions, and accessories. The protocol documentation in `/docs` is intended to help other owners adapt the integration to their specific coach configuration.
+The current implementation should be considered **feature complete for the app-visible Precision Plex functions available on this tested coach**. Other Precision Plex-equipped coaches may expose different features, circuits, slides, tanks, or generator options.
+
+The following items were checked and are **not available in the Precision Plex app on the tested coach**, so they are not current integration targets:
+
+- HVAC / thermostat controls
+- Generator fault-code details beyond the decoded generator status field
+- Shore power telemetry
+- Inverter telemetry
+- Tank heater controls
+- Water heater telemetry
+- Native slide position telemetry
+- Native awning position telemetry
 
 ## Project Vision
 
 This project began as a Home Assistant integration for monitoring Precision Plex state.
 
-The current direction is a native Home Assistant replacement for the Precision Circuits Wireless TP mobile application:
+The current direction is a native Home Assistant replacement for the Precision Circuits Wireless TP mobile application for the tested coach:
 
 ```text
 Precision Plex Controller
@@ -36,7 +47,7 @@ The integration provides:
 - Native Home Assistant light, switch, cover, sensor, binary sensor, button, and number entities
 - Awning and slide position estimation
 - Complete Level Monitor telemetry for the tested coach
-- Generator running status, runtime telemetry, and guarded generator Start/Stop control
+- Complete generator control/status coverage for the tested app-visible generator functions
 
 ## Important Bluetooth Architecture Note
 
@@ -44,9 +55,9 @@ The Precision Plex Wireless TP module appears to allow only one active BLE conne
 
 The integration intentionally maintains a persistent Bluetooth connection while Home Assistant is running. When Home Assistant is connected, the Precision Circuits iOS app may be unable to connect at the same time. This is expected behavior for the Wireless TP module.
 
-## Current Stable Feature Set
+## Confirmed Working Feature Set
 
-Tested and working as of **v2.6.29**:
+Tested and working as of **v2.6.32**:
 
 ### Controls
 
@@ -55,14 +66,16 @@ Tested and working as of **v2.6.29**:
 - `switch.water_heater`
 - `button.generator_start`
 - `button.generator_stop`
+- `button.generator_auto_start`
+- `button.generator_auto_stop`
 - `cover.awning`
 - `cover.bed_slide`
 - `cover.wardrobe_slide`
 - `cover.sofa_slide`
 
-### Level Monitor Sensors
+### Telemetry and Status
 
-Decoded from handle `0x002B` / characteristic `02AA`:
+Decoded from BLE notifications, primarily handle `0x002B` / characteristic `02AA`:
 
 - `sensor.coach_battery`
 - `sensor.fresh_water_tank`
@@ -71,14 +84,21 @@ Decoded from handle `0x002B` / characteristic `02AA`:
 - `sensor.lp_gas_tank`
 - `binary_sensor.generator_running`
 - `sensor.generator_runtime`
+- `sensor.generator_status`
 
-### Status / Movement Sensors
+Confirmed generator status values:
+
+- `Stopped`
+- `Running`
+- `Performing Generator AutoStart`
+- `Performing Generator AutoStop`
+- `Will Not Start`
+
+### Status / Movement Helpers
 
 - Awning light state
 - Water pump state
 - Water heater state
-- Generator running state
-- Generator runtime hours
 - Awning extending/retracting
 - Bed slide extending/retracting
 - Wardrobe slide extending/retracting
@@ -118,25 +138,42 @@ Known fields:
 | Grey Water | byte 3 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
 | Black Water | byte 4 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
 | LP Gas | byte 5 high nibble | `0=0%`, `2=25%`, `5=50%`, `7=75%`, `A=100%` |
-| Generator Running | byte 6 bit `0x10` | `0x00=stopped`, `0x10=running` |
-| Generator Runtime | bytes 7-8, big-endian tenths of hours | `0x04B5` = 120.5 hours |
+| Generator status word | bytes 6-7, big-endian | see generator status table below |
+| Generator Runtime | bytes 7-8 in the established decoder path, big-endian tenths of hours | `0x04B5` = 120.5 hours |
+
+Generator status values confirmed on the tested coach:
+
+| Status Word | Meaning |
+|---:|---|
+| `0x0004` | Stopped |
+| `0x1004` | Running |
+| `0x00A0` | AutoStart command accepted / transition begins |
+| `0x2004` | Will Not Start |
+| `0x6004` | Performing Generator AutoStart |
+| `0x7004` | Performing Generator AutoStop |
+
+Unknown generator status codes are exposed/logged as raw values for future decoding.
 
 ## Generator Control
 
-Generator Start and Stop are implemented as guarded momentary button entities.
+Generator controls are implemented as guarded momentary button entities.
 
 The integration blocks unsafe or redundant commands:
 
 - Start is only allowed when live telemetry says the generator is not running.
 - Stop is only allowed when live telemetry says the generator is running.
-- Both commands are blocked when generator state is unknown or unavailable.
+- AutoStart is only allowed when live telemetry says the generator is not running.
+- AutoStop is only allowed when live telemetry says the generator is running.
+- All generator commands are blocked when generator state is unknown or unavailable.
 
 Confirmed command packets are written to the control characteristic / handle `0x0037` in app captures:
 
 ```text
-Start press: 55 1D 10 0B 00 3E 02 00 00 00 00 00 00 00 00 33
-Stop press:  55 1D 10 0B 00 3E 03 00 00 00 00 00 00 00 00 32
-Release:     55 1D 10 0B 00 3F 00 00 00 00 00 00 00 00 00 34
+Start press:     55 1D 10 0B 00 3E 02 00 00 00 00 00 00 00 00 33
+Stop press:      55 1D 10 0B 00 3E 03 00 00 00 00 00 00 00 00 32
+AutoStart press: 55 1D 10 0B 00 3E 0A 00 00 00 00 00 00 00 00 2B
+AutoStop press:  55 1D 10 0B 00 3E 0B 00 00 00 00 00 00 00 00 2A
+Release:         55 1D 10 0B 00 3F 00 00 00 00 00 00 00 00 00 34
 ```
 
 ## Installation
@@ -216,14 +253,14 @@ The integration can be disabled and re-enabled from Home Assistant without requi
 
 During unload, the integration stops the persistent BLE coordinator, cancels and awaits the BLE monitor task, disconnects the BLE client, removes stale startup callbacks, clears listeners, and unloads platforms cleanly.
 
-## Planned / Future Work
+## Current Project Status
 
-Likely next targets:
+For the tested 2022 Forest River Georgetown GT5 34M5, the core Precision Plex mobile-app-visible feature set has been decoded and validated.
 
-- Generator fault decoding
-- Generator maintenance information
-- Native slide position telemetry
-- Native awning position telemetry
-- Additional coach-specific Precision Plex functions
+Future work is limited to:
+
 - Dashboard examples
-- Expanded protocol documentation
+- Improved entity naming/icons if desired
+- Expanded protocol notes as new captures are discovered
+- Additional coach-specific functions if other Precision Plex installations expose different app features
+- Optional diagnostics for unknown packets/status codes

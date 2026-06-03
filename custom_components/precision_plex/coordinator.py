@@ -63,8 +63,11 @@ class PrecisionPlexStateCoordinator:
         self.lp_gas_level: int | None = None
         self.raw_lp_level: int | None = None
         self.generator_running: bool | None = None
+        self.generator_status: str | None = None
+        self.generator_status_key: str | None = None
         self.generator_runtime_hours: float | None = None
         self.raw_generator_status: int | None = None
+        self.raw_generator_status_word: int | None = None
         self.raw_generator_runtime_tenths: int | None = None
         self.available = False
 
@@ -122,8 +125,11 @@ class PrecisionPlexStateCoordinator:
         self.lp_gas_level = None
         self.raw_lp_level = None
         self.generator_running = None
+        self.generator_status = None
+        self.generator_status_key = None
         self.generator_runtime_hours = None
         self.raw_generator_status = None
+        self.raw_generator_status_word = None
         self.raw_generator_runtime_tenths = None
         self.raw_battery_state = None
         self._notify_listeners()
@@ -635,22 +641,68 @@ class PrecisionPlexStateCoordinator:
 
         if len(raw) >= 9:
             # Controlled Generator app captures from 2026-06-03:
-            #   00 83 00 0F 0F 50 00 04 B4... -> Generator stopped, 120.4 hours
-            #   00 88 00 0F 0F 50 10 04 B4... -> Generator running, 120.4 hours
-            # Generator running flag is bit 0x10 of byte index 6.
-            # Generator run time is bytes 7-8, big-endian tenths of hours.
+            #   ... 00 04 B5 ... -> Stopped, 120.5 hours
+            #   ... 10 04 B5 ... -> Running, 120.5 hours
+            #   ... 00 A0 B5 ... -> AutoStart command accepted / transition begins
+            #   ... 60 04 B5 ... -> Performing Generator AutoStart
+            #   ... 70 04 B5 ... -> Performing Generator AutoStop
+            #   ... 20 04 B6 ... -> Will Not Start after failed AutoStart attempts
+            # Generator status lives primarily in byte index 6. During one
+            # AutoStart transition, the 16-bit word at bytes 6-7 becomes 0x00A0.
+            # Generator run time is normally bytes 7-8, big-endian tenths of hours.
             raw_generator_status = raw[6]
+            raw_generator_status_word = int.from_bytes(raw[6:8], "big")
             raw_generator_runtime_tenths = int.from_bytes(raw[7:9], "big")
 
             self.raw_generator_status = raw_generator_status
-            self.generator_running = bool(raw_generator_status & 0x10)
-            self.raw_generator_runtime_tenths = raw_generator_runtime_tenths
-            self.generator_runtime_hours = raw_generator_runtime_tenths / 10
+            self.raw_generator_status_word = raw_generator_status_word
+
+            if raw_generator_status_word == 0x00A0:
+                self.generator_status_key = "auto_start_accepted"
+                self.generator_status = "AutoStart Accepted"
+            elif raw_generator_status == 0x00:
+                self.generator_status_key = "stopped"
+                self.generator_status = "Stopped"
+            elif raw_generator_status == 0x10:
+                self.generator_status_key = "running"
+                self.generator_status = "Running"
+            elif raw_generator_status == 0x50:
+                self.generator_status_key = "stop_accepted"
+                self.generator_status = "Stop Accepted"
+            elif raw_generator_status == 0x60:
+                self.generator_status_key = "auto_starting"
+                self.generator_status = "Performing Generator AutoStart"
+            elif raw_generator_status == 0x70:
+                self.generator_status_key = "auto_stopping"
+                self.generator_status = "Performing Generator AutoStop"
+            elif raw_generator_status == 0x20:
+                self.generator_status_key = "will_not_start"
+                self.generator_status = "Will Not Start"
+            else:
+                self.generator_status_key = f"unknown_0x{raw_generator_status:02X}"
+                self.generator_status = f"Unknown 0x{raw_generator_status:02X}"
+                _LOGGER.warning(
+                    "Precision Plex unknown generator status raw_status=0x%02X raw_word=0x%04X raw=%s",
+                    raw_generator_status,
+                    raw_generator_status_word,
+                    raw.hex(" "),
+                )
+
+            # Preserve the already-confirmed binary running behavior while the new
+            # status sensor exposes managed transitions separately.
+            self.generator_running = raw_generator_status == 0x10
+
+            # Avoid overwriting the runtime with transitional command/status words
+            # like 0x00A0, which are not actual hour-counter values.
+            if raw_generator_status_word != 0x00A0:
+                self.raw_generator_runtime_tenths = raw_generator_runtime_tenths
+                self.generator_runtime_hours = raw_generator_runtime_tenths / 10
+
             self.raw_battery_state = raw
             self.available = True
 
         _LOGGER.debug(
-            "Precision Plex 02AA decoded from %s sender=%s raw=%s coach_voltage=%s fresh_water_level=%s raw_fresh=%s grey_water_level=%s raw_grey=%s black_water_level=%s raw_black=%s lp_gas_level=%s raw_lp=%s generator_running=%s generator_runtime_hours=%s raw_generator_status=%s raw_generator_runtime_tenths=%s",
+            "Precision Plex 02AA decoded from %s sender=%s raw=%s coach_voltage=%s fresh_water_level=%s raw_fresh=%s grey_water_level=%s raw_grey=%s black_water_level=%s raw_black=%s lp_gas_level=%s raw_lp=%s generator_running=%s generator_runtime_hours=%s raw_generator_status=%s raw_generator_status_word=%s raw_generator_runtime_tenths=%s",
             source,
             f"0x{sender:04X}" if isinstance(sender, int) else None,
             raw.hex(" "),
@@ -666,6 +718,7 @@ class PrecisionPlexStateCoordinator:
             self.generator_running,
             self.generator_runtime_hours,
             f"0x{self.raw_generator_status:02X}" if isinstance(self.raw_generator_status, int) else None,
+            f"0x{self.raw_generator_status_word:04X}" if isinstance(self.raw_generator_status_word, int) else None,
             self.raw_generator_runtime_tenths,
         )
 
