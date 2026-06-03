@@ -1,1 +1,1 @@
-Precision Plex Home Assistant Integration v2.6.33 - Feature Complete Release with Protocol Documentation
+Precision Plex Home Assistant Integration v3.0.0 - Built-In BLE Pairing and Bonding Release

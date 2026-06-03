@@ -123,3 +123,10 @@
 ## v1.0.0
 
 - Initial working awning light control.
+
+## v3.0.0 - Built-In BLE Pairing / Bonding
+
+- Added config-flow BLE pairing support using a temporary BlueZ `NoInputNoOutput` pairing agent.
+- Promoted the successful Precision Plex pairing workflow validated against the `Precision - D244B4` BLE endpoint.
+- Confirmed pairing occurs through standard BLE SMP bonding/security, followed by the existing app/session initialization payload.
+
