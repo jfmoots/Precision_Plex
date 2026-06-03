@@ -1,4 +1,4 @@
-# Precision Plex Home Assistant Integration v2.6.32
+# Precision Plex Home Assistant Integration v2.6.33
 
 This is a GitHub-ready cleanup release built from the validated v2.6.31 generator work.
 
@@ -42,7 +42,7 @@ For the tested 2022 Forest River Georgetown GT5 34M5, this release is considered
 
 ## Documentation Updated
 
-- README updated for v2.6.32 and app-visible feature-complete status.
+- README updated for v2.6.33 and app-visible feature-complete status.
 - Protocol overview expanded with the final generator state map.
 - State mapping expanded with tank, LP, generator runtime, and generator status fields.
 - Command mapping updated with Generator AutoStart and AutoStop commands.

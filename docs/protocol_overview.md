@@ -2,9 +2,9 @@
 
 ## Communication Model
 
-The Precision Plex Wireless TP module exposes BLE characteristics used by the mobile app. This integration uses the same communication path:
+The Precision Plex Wireless TP module exposes BLE services and characteristics used by the official mobile app. This integration uses the same communication path:
 
-1. Subscribe to state, status, and level notifications.
+1. Subscribe to state, status, level, and generator telemetry notifications.
 2. Decode circuit state words, Level Monitor bytes, and generator status/runtime fields from notification payloads.
 3. Send command packets to the control characteristic for supported controls.
 4. Update Home Assistant entities from BLE notifications and command results.
@@ -21,14 +21,72 @@ Wireless TP Module
 Home Assistant
 ```
 
-## Important Characteristics
+## Official App Diagnostic Information
 
-| Purpose | Characteristic | Observed Handle | Notes |
-|---|---|---:|---|
-| Control writes | `03726f62-6f74-7061-6a61-6d61732e6361` | `0x0037` in app traces | Used for button/control commands |
-| State/status | `02bb6f62-6f74-7061-6a61-6d61732e6361` | observed `0x002F` / related notify stream | Wall-panel and circuit status words |
-| Level monitor / generator telemetry | `02aa6f62-6f74-7061-6a61-6d61732e6361` | `0x002B` | Coach battery, tanks, LP, generator status, generator runtime |
-| Additional status/text stream | observed on related app captures | `0x0033`, `0x003A` | Used by the app for other display/status data; not required for the current feature-complete decoder |
+The official Precision Plex app reports the tested coach profile as:
+
+```text
+Model_Georgetown_GT_34M5_w_2AC
+Model: GT 34M5 with 2AC
+STM Version: 4
+App Version: 5.06.01
+File Version: 3.989
+RV Data: GT 34M5 with 2AC v5.06.01 f3.989
+```
+
+The app also reports:
+
+```text
+hvacSupportOnApp false
+hvacSendsHeatPumpBits false
+```
+
+This confirms that HVAC support is disabled in the official app for the tested coach profile.
+
+## Official App BLE Characteristics
+
+Observed directly in the official Precision Plex app diagnostic log:
+
+```text
+ANDROID1_CHAR_UUID: 02AA6F62-6F74-7061-6A61-6D61732E6361
+ANDROID2_CHAR_UUID: 02BB6F62-6F74-7061-6A61-6D61732E6361
+ANDROID3_CHAR_UUID: 02BB6F62-6374-7061-6A61-6D61332E6361
+BLE_TX_CHAR_UUID:   BBC94B12-7BBC-42CE-BB6F-757DA304199F
+```
+
+Observed custom service:
+
+```text
+00726F62-6F74-7061-6A61-6D61732E6361
+```
+
+Known Home Assistant integration usage:
+
+- Control writes use the control characteristic observed at handle `0x0037` in app traces.
+- Level Monitor and generator telemetry are decoded from `02AA`, observed at handle `0x002B`.
+- State/status notifications are received from `02BB`-family streams.
+- Additional status/text notifications were observed on handles `0x0033` and `0x003A`, but they are not required for the current feature-complete decoder.
+
+## Pairing / Bond Verification
+
+The official app performs a BLE bonding verification sequence before normal operation.
+
+Observed app sequence:
+
+```text
+Virgin first run - verifying connection
+doConnect()
+Attempt to connect
+centralManager didConnect()
+Connected to BLE Device. Now discovering services
+peripheral didDiscoverServices()
+process_pairing()
+*** Bond verified - Pairing Complete ***
+rvRead()
++++++++ RV READ++++++
+```
+
+After bonding is verified, the app subscribes to the telemetry characteristics and begins normal RV reads.
 
 ## Command Packet Pattern
 
@@ -62,32 +120,28 @@ WillNotStart: 00 8F 00 0F 0F 50 20 04 B6 00 00 01 ...
 
 Known fields:
 
-| Field | Source | Mapping |
-|---|---|---|
-| Coach Battery | bytes 0-1, big-endian tenths of volts | `0x0083` = 13.1 V |
-| Fresh Water | byte 2 low nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
-| Grey Water | byte 3 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
-| Black Water | byte 4 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
-| LP Gas | byte 5 high nibble | `0=0%`, `2=25%`, `5=50%`, `7=75%`, `A=100%` |
-| Generator status word | bytes 6-7, big-endian | see status table |
-| Generator Runtime | established decoder path uses adjacent bytes as big-endian tenths of hours | `0x04B4` = 120.4 hours, `0x04B5` = 120.5 hours |
+- Coach Battery: bytes 0-1, big-endian tenths of volts. Example: `0x0083 = 13.1 V`.
+- Fresh Water: byte 2 low nibble. `0=0%`, `3=33%`, `6=67%`, `A=100%`.
+- Grey Water: byte 3 high nibble. `0=0%`, `3=33%`, `6=67%`, `A=100%`.
+- Black Water: byte 4 high nibble. `0=0%`, `3=33%`, `6=67%`, `A=100%`.
+- LP Gas: byte 5 high nibble. `0=0%`, `2=25%`, `5=50%`, `7=75%`, `A=100%`.
+- Generator Status Word: bytes 6-7, big-endian.
+- Generator Runtime: established decoder path uses adjacent bytes as big-endian tenths of hours. Example: `0x04B4 = 120.4 hours`, `0x04B5 = 120.5 hours`.
 
-### Generator Status Word
+## Generator Status Word
 
-| Status Word | Meaning | Validation |
-|---:|---|---|
-| `0x0004` | Stopped | Captured with generator off |
-| `0x1004` | Running | Captured with generator running |
-| `0x00A0` | AutoStart command accepted / transition begins | Observed during AutoStart process |
-| `0x2004` | Will Not Start | Captured after four failed AutoStart attempts |
-| `0x6004` | Performing Generator AutoStart | Captured during managed AutoStart sequence |
-| `0x7004` | Performing Generator AutoStop | Captured during managed AutoStop sequence |
+Confirmed on the tested coach:
+
+- `0x0004 = Stopped`
+- `0x1004 = Running`
+- `0x00A0 = AutoStart command accepted / transition begins`
+- `0x2004 = Will Not Start`
+- `0x6004 = Performing Generator AutoStart`
+- `0x7004 = Performing Generator AutoStop`
 
 A matching `Will Not Stop` state likely exists, but it has not been safely captured. Unknown status codes are exposed/logged as raw values rather than guessed.
 
 ## Level Monitor Encoding
-
-### Fresh / Grey / Black Tanks
 
 Fresh, Grey, and Black use the same 4-state encoding:
 
@@ -99,8 +153,6 @@ Fresh, Grey, and Black use the same 4-state encoding:
 ```
 
 The controller interprets the physical tank probes and transmits the resulting status. The BLE packet does not expose individual raw probe continuity states.
-
-### LP Gas
 
 LP uses a 5-state encoding:
 
@@ -130,6 +182,6 @@ See `docs/command_mapping.md` for the full control map.
 
 ## Coach Variability
 
-The protocol appears largely shared across Precision Plex installations, but function IDs, state bits, and available features may vary by coach.
+The protocol appears largely shared across Precision Plex installations, but function IDs, state bits, model files, and available features may vary by coach.
 
 This integration was reverse engineered from a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**. For this coach, the app-visible Precision Plex feature set is now covered by the integration.

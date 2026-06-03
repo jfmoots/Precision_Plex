@@ -1,6 +1,17 @@
 # Release History
 
-## v2.6.32 - GitHub Ready App-Visible Feature Complete Release
+## v2.6.33 - Feature Complete Release with Official App Protocol Documentation
+
+- Promotes v2.6.32 into an expanded GitHub-ready release.
+- Adds official Precision Plex app diagnostic details to the documentation.
+- Documents the tested coach profile: `Model_Georgetown_GT_34M5_w_2AC`.
+- Documents app/version details: App Version `5.06.01`, File Version `3.989`, STM Version `4`.
+- Documents official app BLE characteristic names: `ANDROID1_CHAR_UUID`, `ANDROID2_CHAR_UUID`, `ANDROID3_CHAR_UUID`, and `BLE_TX_CHAR_UUID`.
+- Documents the official app pairing/bond-verification sequence.
+- Documents that HVAC is disabled in the official app for this coach profile with `hvacSupportOnApp false` and `hvacSendsHeatPumpBits false`.
+- Clarifies implemented app-visible features and features not present in the official app on the tested coach.
+
+## v2.6.33 - GitHub Ready App-Visible Feature Complete Release
 
 - Promoted validated v2.6.31 generator work into a GitHub-ready release.
 - Updated README and docs to reflect that the tested coach's core app-visible Precision Plex feature set is complete.

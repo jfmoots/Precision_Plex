@@ -87,3 +87,19 @@ Different coaches may expose different:
 Current support should be considered verified for the Georgetown GT5 34M5 reference coach.
 
 Other coaches may require additional state mapping and command decoding.
+
+
+## Official Precision Plex App Diagnostic Context
+
+Observed from the official Precision Plex app diagnostic log:
+
+```text
+Model_Georgetown_GT_34M5_w_2AC
+STM Version: 4
+App Version: 5.06.01
+File Version: 3.989
+hvacSupportOnApp false
+hvacSendsHeatPumpBits false
+```
+
+These diagnostics confirm the tested coach profile and the absence of HVAC support in the official app for this coach.

@@ -4,15 +4,86 @@ A custom Home Assistant integration for Precision Circuits Precision Plex system
 
 ## Current Recommended Release
 
-**v2.6.32** is the current GitHub-ready release.
+**v2.6.33** is the current GitHub-ready release.
 
-This release promotes the validated v2.6.31 generator work into a cleaned, documented release package. For the tested coach, the integration now covers the core Precision Plex functions that are visible in the Precision Plex mobile app.
+This release promotes the validated v2.6.31 generator work into a cleaned, documented release package and adds official Precision Plex app diagnostic details gathered from the tested coach. For the tested coach, the integration now covers the major Precision Plex functions that are visible in the Precision Plex mobile app.
 
 ## Tested Coach and Scope
 
 This integration was reverse engineered from a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
 
-The current implementation should be considered **feature complete for the app-visible Precision Plex functions available on this tested coach**. Other Precision Plex-equipped coaches may expose different features, circuits, slides, tanks, or generator options.
+The current implementation should be considered **feature complete for the app-visible Precision Plex functions available on this tested coach**. Other Precision Plex-equipped coaches may expose different features, circuits, slides, tanks, generator options, or app configuration profiles.
+
+### Coach Profile Observed in Official App Diagnostics
+
+The official Precision Plex application identifies this coach profile as:
+
+```text
+Model_Georgetown_GT_34M5_w_2AC
+```
+
+Observed application/platform details:
+
+```text
+Model: GT 34M5 with 2AC
+STM Version: 4
+App Version: 5.06.01
+File Version: 3.989
+RV Data: GT 34M5 with 2AC v5.06.01 f3.989
+```
+
+The app diagnostic log also reports:
+
+```text
+hvacSupportOnApp false
+hvacSendsHeatPumpBits false
+```
+
+This confirms that HVAC support is disabled by the official app for this coach profile.
+
+## Implemented Precision Plex Features
+
+The following features are present in the official Precision Plex app for the tested coach and are implemented in this integration.
+
+### Lighting
+
+- Awning Light
+
+### Levels
+
+- Fresh Water Tank
+- Grey Water Tank
+- Black Water Tank
+- LP Gas Tank
+- Coach Battery Voltage
+
+### Slides
+
+- Bed Slide
+- Wardrobe Slide
+- Sofa Slide
+
+### Awnings
+
+- Awning Cover
+
+### Generator
+
+- Generator Start
+- Generator Stop
+- Generator AutoStart
+- Generator AutoStop
+- Generator Running Status
+- Generator Runtime Hours
+- Generator Status
+- Generator Failure Detection: Will Not Start
+
+### Utilities
+
+- Water Pump
+- Water Heater
+
+## Features Not Present in the Official App on the Tested Coach
 
 The following items were checked and are **not available in the Precision Plex app on the tested coach**, so they are not current integration targets:
 
@@ -55,9 +126,49 @@ The Precision Plex Wireless TP module appears to allow only one active BLE conne
 
 The integration intentionally maintains a persistent Bluetooth connection while Home Assistant is running. When Home Assistant is connected, the Precision Circuits iOS app may be unable to connect at the same time. This is expected behavior for the Wireless TP module.
 
+## Precision Plex Pairing Notes
+
+The official Precision Plex app performs a BLE bonding verification process before normal operation.
+
+Observed official app sequence:
+
+```text
+Virgin first run - verifying connection
+doConnect()
+Attempt to connect
+centralManager didConnect()
+Connected to BLE Device. Now discovering services
+peripheral didDiscoverServices()
+process_pairing()
+*** Bond verified - Pairing Complete ***
+rvRead()
++++++++ RV READ++++++
+```
+
+The Precision Plex controller must be placed into mobile pairing mode before initial pairing.
+
+## Official App BLE Characteristics
+
+The official app diagnostic log reports these subscription/write characteristic identifiers:
+
+```text
+ANDROID1_CHAR_UUID: 02AA6F62-6F74-7061-6A61-6D61732E6361
+ANDROID2_CHAR_UUID: 02BB6F62-6F74-7061-6A61-6D61732E6361
+ANDROID3_CHAR_UUID: 02BB6F62-6374-7061-6A61-6D61332E6361
+BLE_TX_CHAR_UUID:   BBC94B12-7BBC-42CE-BB6F-757DA304199F
+```
+
+Observed custom service:
+
+```text
+00726F62-6F74-7061-6A61-6D61732E6361
+```
+
+These match the characteristic families used by the Home Assistant integration for telemetry and control.
+
 ## Confirmed Working Feature Set
 
-Tested and working as of **v2.6.32**:
+Tested and working as of **v2.6.33**.
 
 ### Controls
 
@@ -131,26 +242,22 @@ Example payload:
 
 Known fields:
 
-| Field | Source | Mapping |
-|---|---|---|
-| Coach Battery | bytes 0-1, big-endian tenths of volts | `0x0083` = 13.1 V |
-| Fresh Water | byte 2 low nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
-| Grey Water | byte 3 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
-| Black Water | byte 4 high nibble | `0=0%`, `3=33%`, `6=67%`, `A=100%` |
-| LP Gas | byte 5 high nibble | `0=0%`, `2=25%`, `5=50%`, `7=75%`, `A=100%` |
-| Generator status word | bytes 6-7, big-endian | see generator status table below |
-| Generator Runtime | bytes 7-8 in the established decoder path, big-endian tenths of hours | `0x04B5` = 120.5 hours |
+- Coach Battery: bytes 0-1, big-endian tenths of volts. Example: `0x0083 = 13.1 V`.
+- Fresh Water: byte 2 low nibble. `0=0%`, `3=33%`, `6=67%`, `A=100%`.
+- Grey Water: byte 3 high nibble. `0=0%`, `3=33%`, `6=67%`, `A=100%`.
+- Black Water: byte 4 high nibble. `0=0%`, `3=33%`, `6=67%`, `A=100%`.
+- LP Gas: byte 5 high nibble. `0=0%`, `2=25%`, `5=50%`, `7=75%`, `A=100%`.
+- Generator Status Word: bytes 6-7, big-endian.
+- Generator Runtime: established decoder path uses adjacent bytes as big-endian tenths of hours. Example: `0x04B5 = 120.5 hours`.
 
-Generator status values confirmed on the tested coach:
+Confirmed generator status values:
 
-| Status Word | Meaning |
-|---:|---|
-| `0x0004` | Stopped |
-| `0x1004` | Running |
-| `0x00A0` | AutoStart command accepted / transition begins |
-| `0x2004` | Will Not Start |
-| `0x6004` | Performing Generator AutoStart |
-| `0x7004` | Performing Generator AutoStop |
+- `0x0004 = Stopped`
+- `0x1004 = Running`
+- `0x00A0 = AutoStart command accepted / transition begins`
+- `0x2004 = Will Not Start`
+- `0x6004 = Performing Generator AutoStart`
+- `0x7004 = Performing Generator AutoStop`
 
 Unknown generator status codes are exposed/logged as raw values for future decoding.
 
@@ -232,12 +339,10 @@ The integration includes timed safety limits for covers and generator command in
 
 These travel times were validated on a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
 
-| Device | Open / Out | Close / In |
-|---|---:|---:|
-| Awning | 18 seconds | 25 seconds |
-| Bed Slide | 28 seconds | 24 seconds |
-| Wardrobe Slide | 18 seconds | 17 seconds |
-| Sofa Slide | 32 seconds | 28 seconds |
+- Awning: 18 seconds open / 25 seconds close
+- Bed Slide: 28 seconds open / 24 seconds close
+- Wardrobe Slide: 18 seconds open / 17 seconds close
+- Sofa Slide: 32 seconds open / 28 seconds close
 
 Travel times vary by coach, slide mechanism, battery voltage, maintenance condition, and motor wear. These values can be adjusted through the Home Assistant Number entities without modifying the integration.
 

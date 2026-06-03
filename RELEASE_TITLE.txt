@@ -1,1 +1,1 @@
-Precision Plex Home Assistant Integration v2.6.32 - App-Visible Feature Complete Release
+Precision Plex Home Assistant Integration v2.6.33 - Feature Complete Release with Protocol Documentation
