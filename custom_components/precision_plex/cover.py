@@ -59,6 +59,7 @@ class PrecisionPlexCoverDescription:
     in_full_seconds: float
     out_seconds_setting_key: str
     in_seconds_setting_key: str
+    jog_seconds_setting_key: str
 
 
 COVERS: tuple[PrecisionPlexCoverDescription, ...] = (
@@ -75,6 +76,7 @@ COVERS: tuple[PrecisionPlexCoverDescription, ...] = (
         in_full_seconds=25.0,
         out_seconds_setting_key="awning_open_seconds",
         in_seconds_setting_key="awning_close_seconds",
+        jog_seconds_setting_key="awning_jog_seconds",
     ),
     PrecisionPlexCoverDescription(
         key="bed_slide",
@@ -89,6 +91,7 @@ COVERS: tuple[PrecisionPlexCoverDescription, ...] = (
         in_full_seconds=24.0,
         out_seconds_setting_key="bed_slide_open_seconds",
         in_seconds_setting_key="bed_slide_close_seconds",
+        jog_seconds_setting_key="bed_slide_jog_seconds",
     ),
     PrecisionPlexCoverDescription(
         key="wardrobe_slide",
@@ -103,6 +106,7 @@ COVERS: tuple[PrecisionPlexCoverDescription, ...] = (
         in_full_seconds=17.0,
         out_seconds_setting_key="wardrobe_slide_open_seconds",
         in_seconds_setting_key="wardrobe_slide_close_seconds",
+        jog_seconds_setting_key="wardrobe_slide_jog_seconds",
     ),
     PrecisionPlexCoverDescription(
         key="sofa_slide",
@@ -117,6 +121,7 @@ COVERS: tuple[PrecisionPlexCoverDescription, ...] = (
         in_full_seconds=28.0,
         out_seconds_setting_key="sofa_slide_open_seconds",
         in_seconds_setting_key="sofa_slide_close_seconds",
+        jog_seconds_setting_key="sofa_slide_jog_seconds",
     ),
 )
 
@@ -167,6 +172,10 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._motion_direction: str | None = None
         self._motion_started_at: float | None = None
         self._last_position_update_at: float | None = None
+
+        if not hasattr(self.coordinator, "cover_entities"):
+            self.coordinator.cover_entities = {}
+        self.coordinator.cover_entities[description.key] = self
 
     async def async_added_to_hass(self) -> None:
         """Restore last estimated position and subscribe to coordinator updates."""
@@ -285,6 +294,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             "open_full_seconds": self._out_full_seconds(),
             "close_full_seconds": self._in_full_seconds(),
             "hold_interval_seconds": HOLD_INTERVAL_SECONDS,
+            "jog_seconds": self._jog_seconds(),
         }
 
     async def async_open_cover(self, **kwargs: Any) -> None:
@@ -348,6 +358,38 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 hold_payload=self._plex_description.in_hold_payload,
                 max_duration_seconds=seconds,
             )
+
+
+    async def async_jog(self, direction: str) -> None:
+        """Manually jog the cover for the configured duration, ignoring estimated limits."""
+        duration = self._jog_seconds()
+        if direction == "out":
+            await self._async_start_hold(
+                direction="out",
+                release_payload=self._plex_description.out_release_payload,
+                hold_payload=self._plex_description.out_hold_payload,
+                max_duration_seconds=duration,
+            )
+        elif direction == "in":
+            await self._async_start_hold(
+                direction="in",
+                release_payload=self._plex_description.in_release_payload,
+                hold_payload=self._plex_description.in_hold_payload,
+                max_duration_seconds=duration,
+            )
+        else:
+            raise ValueError(f"Unsupported Precision Plex jog direction: {direction}")
+
+    async def async_reset_estimated_position(self, position: float) -> None:
+        """Reset the estimated position without moving hardware."""
+        async with self._command_lock:
+            await self._async_stop_hold_task()
+            self._motion_direction = None
+            self._motion_started_at = None
+            self._last_position_update_at = None
+            self._active_direction = None
+            self._estimated_position = max(0.0, min(100.0, float(position)))
+            self.async_write_ha_state()
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop cover movement."""
@@ -596,6 +638,15 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             getattr(self.coordinator, "runtime_settings", {}).get(
                 self._plex_description.in_seconds_setting_key,
                 self._plex_description.in_full_seconds,
+            )
+        )
+
+    def _jog_seconds(self) -> float:
+        """Return current configured jog duration."""
+        return float(
+            getattr(self.coordinator, "runtime_settings", {}).get(
+                self._plex_description.jog_seconds_setting_key,
+                2.0 if self._plex_description.key == "awning" else 5.0,
             )
         )
 

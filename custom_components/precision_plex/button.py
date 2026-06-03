@@ -1,14 +1,15 @@
-"""Button platform for Precision Plex momentary controls."""
+"""Button platform for Precision Plex momentary and cover utility controls."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -20,6 +21,7 @@ from .const import (
     GENERATOR_STOP_SEQUENCE,
 )
 from .coordinator import PrecisionPlexStateCoordinator
+from .cover import COVERS, PrecisionPlexCoverDescription
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +54,48 @@ GENERATOR_BUTTONS = {
 }
 
 
+@dataclass(frozen=True)
+class PrecisionPlexCoverButtonDescription:
+    """Description for a Precision Plex cover utility button."""
+
+    key: str
+    name: str
+    cover_key: str
+    action: str
+
+
+COVER_BUTTONS: tuple[PrecisionPlexCoverButtonDescription, ...] = tuple(
+    button
+    for cover in COVERS
+    for button in (
+        PrecisionPlexCoverButtonDescription(
+            key=f"{cover.key}_jog_extend",
+            name=f"{cover.name} Jog Extend",
+            cover_key=cover.key,
+            action="jog_out",
+        ),
+        PrecisionPlexCoverButtonDescription(
+            key=f"{cover.key}_jog_retract",
+            name=f"{cover.name} Jog Retract",
+            cover_key=cover.key,
+            action="jog_in",
+        ),
+        PrecisionPlexCoverButtonDescription(
+            key=f"{cover.key}_reset_extended",
+            name=f"{cover.name} Reset Fully Extended",
+            cover_key=cover.key,
+            action="reset_extended",
+        ),
+        PrecisionPlexCoverButtonDescription(
+            key=f"{cover.key}_reset_retracted",
+            name=f"{cover.name} Reset Fully Retracted",
+            cover_key=cover.key,
+            action="reset_retracted",
+        ),
+    )
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -60,8 +104,10 @@ async def async_setup_entry(
     """Set up Precision Plex button entities."""
     coordinator: PrecisionPlexStateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        PrecisionPlexGeneratorButton(coordinator, entry, key, cfg)
-        for key, cfg in GENERATOR_BUTTONS.items()
+        [
+            *(PrecisionPlexGeneratorButton(coordinator, entry, key, cfg) for key, cfg in GENERATOR_BUTTONS.items()),
+            *(PrecisionPlexCoverUtilityButton(coordinator, entry, description) for description in COVER_BUTTONS),
+        ]
     )
 
 
@@ -84,29 +130,11 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
         self.cfg = cfg
         self._attr_name = cfg["name"]
         self._attr_unique_id = f"{coordinator.address}_{key}"
-        self._remove_listener = None
         self._command_lock = asyncio.Lock()
-
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to coordinator updates."""
-        self._remove_listener = self.coordinator.async_add_listener(
-            self._handle_coordinator_update
-        )
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Unsubscribe from coordinator updates."""
-        if self._remove_listener is not None:
-            self._remove_listener()
-            self._remove_listener = None
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated BLE telemetry."""
-        self.async_write_ha_state()
 
     @property
     def available(self) -> bool:
-        """Only expose the button when telemetry confirms it is safe to press."""
+        """Return whether the button is currently safe to press."""
         return (
             self.coordinator.available
             and self.coordinator.generator_status_key in self.cfg["allowed_status_keys"]
@@ -148,3 +176,84 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
                 self.cfg["sequence"],
                 delay_seconds=0.25,
             )
+
+
+class PrecisionPlexCoverUtilityButton(ButtonEntity):
+    """Jog or reset a Precision Plex cover while preserving estimated position logic."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: PrecisionPlexStateCoordinator,
+        entry: ConfigEntry,
+        description: PrecisionPlexCoverButtonDescription,
+    ) -> None:
+        """Initialize the cover utility button."""
+        self.coordinator = coordinator
+        self.entry = entry
+        self._plex_description = description
+        self._attr_name = description.name
+        self._attr_unique_id = f"{coordinator.address}_{description.key}"
+        self._command_lock = asyncio.Lock()
+
+    @property
+    def available(self) -> bool:
+        """Return availability."""
+        if self._plex_description.action.startswith("reset_"):
+            return True
+        return self.coordinator.available and self._cover is not None
+
+    @property
+    def _cover(self):
+        """Return the live cover entity registered by cover.py, if available."""
+        return getattr(self.coordinator, "cover_entities", {}).get(
+            self._plex_description.cover_key
+        )
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
+            "name": self.entry.title,
+            "manufacturer": "Precision Circuits",
+            "model": "Precision Plex Wireless TP Monitor",
+        }
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return diagnostic attributes."""
+        cover = self._cover
+        return {
+            "cover_key": self._plex_description.cover_key,
+            "action": self._plex_description.action,
+            "command_mode": "cover_engine_jog_or_position_reset",
+            "cover_registered": cover is not None,
+            "jog_seconds": getattr(cover, "_jog_seconds", lambda: None)(),
+        }
+
+    async def async_press(self) -> None:
+        """Perform the requested cover utility action."""
+        async with self._command_lock:
+            cover = self._cover
+            if cover is None:
+                _LOGGER.warning(
+                    "Precision Plex cover button %s could not find registered cover %s",
+                    self._plex_description.key,
+                    self._plex_description.cover_key,
+                )
+                return
+
+            action = self._plex_description.action
+            if action == "jog_out":
+                await cover.async_jog("out")
+            elif action == "jog_in":
+                await cover.async_jog("in")
+            elif action == "reset_extended":
+                await cover.async_reset_estimated_position(100.0)
+            elif action == "reset_retracted":
+                await cover.async_reset_estimated_position(0.0)
+            else:
+                raise ValueError(f"Unsupported Precision Plex cover button action: {action}")

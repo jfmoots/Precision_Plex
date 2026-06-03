@@ -17,15 +17,19 @@ from .const import DOMAIN
 from .coordinator import PrecisionPlexStateCoordinator
 
 
-DEFAULT_TRAVEL_TIMES: dict[str, float] = {
+DEFAULT_RUNTIME_SETTINGS: dict[str, float] = {
     "awning_open_seconds": 18.0,
     "awning_close_seconds": 25.0,
+    "awning_jog_seconds": 2.0,
     "bed_slide_open_seconds": 28.0,
     "bed_slide_close_seconds": 24.0,
+    "bed_slide_jog_seconds": 5.0,
     "wardrobe_slide_open_seconds": 18.0,
     "wardrobe_slide_close_seconds": 17.0,
+    "wardrobe_slide_jog_seconds": 5.0,
     "sofa_slide_open_seconds": 32.0,
     "sofa_slide_close_seconds": 28.0,
+    "sofa_slide_jog_seconds": 5.0,
 }
 
 
@@ -45,42 +49,74 @@ NUMBERS: tuple[PrecisionPlexNumberDescription, ...] = (
     PrecisionPlexNumberDescription(
         key="awning_open_seconds",
         name="Awning Open Seconds",
-        default=DEFAULT_TRAVEL_TIMES["awning_open_seconds"],
+        default=DEFAULT_RUNTIME_SETTINGS["awning_open_seconds"],
     ),
     PrecisionPlexNumberDescription(
         key="awning_close_seconds",
         name="Awning Close Seconds",
-        default=DEFAULT_TRAVEL_TIMES["awning_close_seconds"],
+        default=DEFAULT_RUNTIME_SETTINGS["awning_close_seconds"],
+    ),
+    PrecisionPlexNumberDescription(
+        key="awning_jog_seconds",
+        name="Awning Jog Seconds",
+        default=DEFAULT_RUNTIME_SETTINGS["awning_jog_seconds"],
+        minimum=0.5,
+        maximum=15.0,
+        step=0.5,
     ),
     PrecisionPlexNumberDescription(
         key="bed_slide_open_seconds",
         name="Bed Slide Open Seconds",
-        default=DEFAULT_TRAVEL_TIMES["bed_slide_open_seconds"],
+        default=DEFAULT_RUNTIME_SETTINGS["bed_slide_open_seconds"],
     ),
     PrecisionPlexNumberDescription(
         key="bed_slide_close_seconds",
         name="Bed Slide Close Seconds",
-        default=DEFAULT_TRAVEL_TIMES["bed_slide_close_seconds"],
+        default=DEFAULT_RUNTIME_SETTINGS["bed_slide_close_seconds"],
+    ),
+    PrecisionPlexNumberDescription(
+        key="bed_slide_jog_seconds",
+        name="Bed Slide Jog Seconds",
+        default=DEFAULT_RUNTIME_SETTINGS["bed_slide_jog_seconds"],
+        minimum=0.5,
+        maximum=15.0,
+        step=0.5,
     ),
     PrecisionPlexNumberDescription(
         key="wardrobe_slide_open_seconds",
         name="Wardrobe Slide Open Seconds",
-        default=DEFAULT_TRAVEL_TIMES["wardrobe_slide_open_seconds"],
+        default=DEFAULT_RUNTIME_SETTINGS["wardrobe_slide_open_seconds"],
     ),
     PrecisionPlexNumberDescription(
         key="wardrobe_slide_close_seconds",
         name="Wardrobe Slide Close Seconds",
-        default=DEFAULT_TRAVEL_TIMES["wardrobe_slide_close_seconds"],
+        default=DEFAULT_RUNTIME_SETTINGS["wardrobe_slide_close_seconds"],
+    ),
+    PrecisionPlexNumberDescription(
+        key="wardrobe_slide_jog_seconds",
+        name="Wardrobe Slide Jog Seconds",
+        default=DEFAULT_RUNTIME_SETTINGS["wardrobe_slide_jog_seconds"],
+        minimum=0.5,
+        maximum=15.0,
+        step=0.5,
     ),
     PrecisionPlexNumberDescription(
         key="sofa_slide_open_seconds",
         name="Sofa Slide Open Seconds",
-        default=DEFAULT_TRAVEL_TIMES["sofa_slide_open_seconds"],
+        default=DEFAULT_RUNTIME_SETTINGS["sofa_slide_open_seconds"],
     ),
     PrecisionPlexNumberDescription(
         key="sofa_slide_close_seconds",
         name="Sofa Slide Close Seconds",
-        default=DEFAULT_TRAVEL_TIMES["sofa_slide_close_seconds"],
+        default=DEFAULT_RUNTIME_SETTINGS["sofa_slide_close_seconds"],
+    ),
+    PrecisionPlexNumberDescription(
+        key="sofa_slide_jog_seconds",
+        name="Sofa Slide Jog Seconds",
+        default=DEFAULT_RUNTIME_SETTINGS["sofa_slide_jog_seconds"],
+        minimum=0.5,
+        maximum=15.0,
+        step=0.5,
     ),
 )
 
@@ -96,9 +132,9 @@ async def async_setup_entry(
     # Shared runtime settings read by cover.py. Number entities restore persisted
     # HA state into this dict on startup, then update it live on value changes.
     if not hasattr(coordinator, "runtime_settings"):
-        coordinator.runtime_settings = DEFAULT_TRAVEL_TIMES.copy()
+        coordinator.runtime_settings = DEFAULT_RUNTIME_SETTINGS.copy()
     else:
-        for key, value in DEFAULT_TRAVEL_TIMES.items():
+        for key, value in DEFAULT_RUNTIME_SETTINGS.items():
             coordinator.runtime_settings.setdefault(key, value)
 
     async_add_entities(

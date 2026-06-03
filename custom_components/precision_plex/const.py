@@ -3,7 +3,7 @@
 from homeassistant.const import CONF_ADDRESS
 
 DOMAIN = "precision_plex"
-PLATFORMS = ["binary_sensor", "button", "light", "switch", "cover", "number", "sensor"]
+PLATFORMS = ["binary_sensor", "cover", "button", "light", "switch", "number", "sensor"]
 
 DEFAULT_TARGET_ADDRESS = "80:4B:50:D2:44:B4"
 TARGET_SERVICE_UUID = "00726f62-6f74-7061-6a61-6d61732e6361"
