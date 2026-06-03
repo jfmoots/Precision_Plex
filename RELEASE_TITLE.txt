@@ -1,1 +1,1 @@
-Precision Plex Home Assistant Integration v3.0.0 - Built-In BLE Pairing and Bonding Release
+Precision Plex for Home Assistant v4.0.2 — Button Availability & Generator Idle-State Fixes

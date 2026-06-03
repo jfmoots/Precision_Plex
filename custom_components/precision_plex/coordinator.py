@@ -657,40 +657,59 @@ class PrecisionPlexStateCoordinator:
             self.raw_generator_status = raw_generator_status
             self.raw_generator_status_word = raw_generator_status_word
 
+            # Some coaches intermittently set status flag bits while the underlying
+            # generator state remains stopped. Known stopped/resting values observed:
+            #   0x00 = stopped / recently stopped
+            #   0x40 = stopped with idle/resting flag
+            #   0x80 = stopped with idle/resting flag
+            #   0xC0 = stopped with both observed idle/resting flags
+            # Keep raw values for diagnostics, but map these flagged idle states to
+            # the same command eligibility as normal stopped.
+            generator_status_code = raw_generator_status & 0x7F
+
             if raw_generator_status_word == 0x00A0:
                 self.generator_status_key = "auto_start_accepted"
                 self.generator_status = "AutoStart Accepted"
-            elif raw_generator_status == 0x00:
+            elif raw_generator_status in (0x00, 0x40, 0x80, 0xC0):
                 self.generator_status_key = "stopped"
-                self.generator_status = "Stopped"
-            elif raw_generator_status == 0x10:
+                self.generator_status = (
+                    "Stopped"
+                    if raw_generator_status == 0x00
+                    else f"Stopped (flag 0x{raw_generator_status:02X})"
+                )
+            elif raw_generator_status in (0x10, 0x90):
                 self.generator_status_key = "running"
-                self.generator_status = "Running"
-            elif raw_generator_status == 0x50:
+                self.generator_status = (
+                    "Running"
+                    if raw_generator_status == 0x10
+                    else f"Running (flag 0x{raw_generator_status:02X})"
+                )
+            elif generator_status_code == 0x50:
                 self.generator_status_key = "stop_accepted"
                 self.generator_status = "Stop Accepted"
-            elif raw_generator_status == 0x60:
+            elif generator_status_code == 0x60:
                 self.generator_status_key = "auto_starting"
                 self.generator_status = "Performing Generator AutoStart"
-            elif raw_generator_status == 0x70:
+            elif generator_status_code == 0x70:
                 self.generator_status_key = "auto_stopping"
                 self.generator_status = "Performing Generator AutoStop"
-            elif raw_generator_status == 0x20:
+            elif generator_status_code == 0x20:
                 self.generator_status_key = "will_not_start"
                 self.generator_status = "Will Not Start"
             else:
                 self.generator_status_key = f"unknown_0x{raw_generator_status:02X}"
                 self.generator_status = f"Unknown 0x{raw_generator_status:02X}"
                 _LOGGER.warning(
-                    "Precision Plex unknown generator status raw_status=0x%02X raw_word=0x%04X raw=%s",
+                    "Precision Plex unknown generator status raw_status=0x%02X decoded_status=0x%02X raw_word=0x%04X raw=%s",
                     raw_generator_status,
+                    generator_status_code,
                     raw_generator_status_word,
                     raw.hex(" "),
                 )
 
             # Preserve the already-confirmed binary running behavior while the new
             # status sensor exposes managed transitions separately.
-            self.generator_running = raw_generator_status == 0x10
+            self.generator_running = raw_generator_status in (0x10, 0x90)
 
             # Avoid overwriting the runtime with transitional command/status words
             # like 0x00A0, which are not actual hour-counter values.

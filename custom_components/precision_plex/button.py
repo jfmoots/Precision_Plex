@@ -9,7 +9,7 @@ from typing import Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -30,7 +30,7 @@ GENERATOR_BUTTONS = {
     "generator_start": {
         "name": "Generator Start",
         "sequence": GENERATOR_START_SEQUENCE,
-        "allowed_status_keys": {"stopped"},
+        "allowed_status_keys": {"stopped", "will_not_start"},
         "blocked_message": "Generator start skipped because generator is not stopped or state is unknown",
     },
     "generator_stop": {
@@ -42,13 +42,13 @@ GENERATOR_BUTTONS = {
     "generator_auto_start": {
         "name": "Generator AutoStart",
         "sequence": GENERATOR_AUTO_START_SEQUENCE,
-        "allowed_status_keys": {"stopped"},
+        "allowed_status_keys": {"stopped", "will_not_start"},
         "blocked_message": "Generator AutoStart skipped because generator is not stopped or state is unknown",
     },
     "generator_auto_stop": {
         "name": "Generator AutoStop",
         "sequence": GENERATOR_AUTO_STOP_SEQUENCE,
-        "allowed_status_keys": {"running"},
+        "allowed_status_keys": {"stopped", "running", "auto_start_accepted", "auto_starting"},
         "blocked_message": "Generator AutoStop skipped because generator is not running or state is unknown",
     },
 }
@@ -131,6 +131,24 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
         self._attr_name = cfg["name"]
         self._attr_unique_id = f"{coordinator.address}_{key}"
         self._command_lock = asyncio.Lock()
+        self._remove_listener = None
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to coordinator updates so availability refreshes after BLE connects."""
+        self._remove_listener = self.coordinator.async_add_listener(
+            self._handle_coordinator_update
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unsubscribe from coordinator updates."""
+        if self._remove_listener is not None:
+            self._remove_listener()
+            self._remove_listener = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Refresh entity state when BLE availability or generator status changes."""
+        self.async_write_ha_state()
 
     @property
     def available(self) -> bool:
@@ -196,6 +214,24 @@ class PrecisionPlexCoverUtilityButton(ButtonEntity):
         self._attr_name = description.name
         self._attr_unique_id = f"{coordinator.address}_{description.key}"
         self._command_lock = asyncio.Lock()
+        self._remove_listener = None
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to coordinator updates so jog availability refreshes after BLE connects."""
+        self._remove_listener = self.coordinator.async_add_listener(
+            self._handle_coordinator_update
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unsubscribe from coordinator updates."""
+        if self._remove_listener is not None:
+            self._remove_listener()
+            self._remove_listener = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Refresh entity state when BLE availability or cover registration changes."""
+        self.async_write_ha_state()
 
     @property
     def available(self) -> bool:
