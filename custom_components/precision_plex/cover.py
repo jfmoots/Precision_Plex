@@ -65,7 +65,7 @@ class PrecisionPlexCoverDescription:
 COVERS: tuple[PrecisionPlexCoverDescription, ...] = (
     PrecisionPlexCoverDescription(
         key="awning",
-        name="Awning",
+        name="Patio Awning",
         out_state_key="awning_out",
         in_state_key="awning_in",
         out_release_payload=AWNING_OUT_RELEASE,
@@ -80,7 +80,7 @@ COVERS: tuple[PrecisionPlexCoverDescription, ...] = (
     ),
     PrecisionPlexCoverDescription(
         key="bed_slide",
-        name="Bed Slide",
+        name="Bedroom Slide",
         out_state_key="bed_slide_out",
         in_state_key="bed_slide_in",
         out_release_payload=BED_SLIDE_OUT_RELEASE,
@@ -278,7 +278,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         return {
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
-            "name": self.entry.title,
+            "name": "Precision Plex",
             "manufacturer": "Precision Circuits",
             "model": "Precision Plex Wireless TP Monitor",
         }
@@ -700,7 +700,7 @@ class PrecisionPlexCleanNativeCover(PrecisionPlexTimedCover):
     Home Assistant dashboards and HomeKit without forcing a migration.
     """
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,

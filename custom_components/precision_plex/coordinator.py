@@ -32,6 +32,8 @@ _LOGGER = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 20.0
 GATT_TIMEOUT = 8.0
 RECONNECT_DELAY_SECONDS = 15.0
+GENERATOR_RUNTIME_MAX_PLAUSIBLE_TENTHS = 10000  # 1000.0 hours; protects against misdecoded 02AA frames
+GENERATOR_RUNTIME_MAX_JUMP_TENTHS = 50  # 5.0 hours between accepted samples is implausible for live telemetry
 
 BLE_EXCEPTIONS = (
     BleakError,
@@ -73,6 +75,8 @@ class PrecisionPlexStateCoordinator:
         self.raw_generator_status: int | None = None
         self.raw_generator_status_word: int | None = None
         self.raw_generator_runtime_tenths: int | None = None
+        self.ignored_generator_runtime_tenths: int | None = None
+        self.ignored_generator_runtime_reason: str | None = None
         self.available = False
 
         self._client: BleakClientWithServiceCache | None = None
@@ -83,8 +87,23 @@ class PrecisionPlexStateCoordinator:
         self._start_unsub: Callable[[], None] | None = None
 
     async def async_start(self) -> None:
-        """Start after Home Assistant startup completes."""
+        """Start the BLE connection task.
+
+        During normal Home Assistant startup we defer until HA reaches the
+        started/running state. When a config entry is added from the UI after
+        HA is already running, async_at_started will not give us another
+        startup event, so start the coordinator immediately.
+        """
         self._stopped = False
+
+        hass_state = getattr(self.hass, "state", None)
+        hass_is_running = bool(getattr(self.hass, "is_running", False))
+        if hass_is_running or str(hass_state).lower().endswith("running"):
+            _LOGGER.debug(
+                "Precision Plex config entry added while Home Assistant is already running; starting BLE monitor immediately"
+            )
+            self._handle_homeassistant_started(self.hass)
+            return
 
         self._start_unsub = async_at_started(
             self.hass,
@@ -98,7 +117,22 @@ class PrecisionPlexStateCoordinator:
             return
 
         if self._task is None or self._task.done():
-            self._task = self.hass.async_create_task(self._connection_loop())
+            # This BLE monitor is a long-running task for the lifetime of the
+            # config entry.  It must be created as a background task; using
+            # hass.async_create_task during bootstrap causes Home Assistant to
+            # wait for the task to finish, which can leave startup stuck on
+            # "Wrapping up startup" until bootstrap times out.
+            task_name = f"precision_plex_connection_loop_{self.entry.entry_id}"
+            if hasattr(self.hass, "async_create_background_task"):
+                self._task = self.hass.async_create_background_task(
+                    self._connection_loop(),
+                    task_name,
+                )
+            else:
+                self._task = asyncio.create_task(
+                    self._connection_loop(),
+                    name=task_name,
+                )
 
     async def async_stop(self) -> None:
         """Stop coordinator, cancel the monitor task, and disconnect BLE cleanly."""
@@ -135,6 +169,8 @@ class PrecisionPlexStateCoordinator:
         self.raw_generator_status = None
         self.raw_generator_status_word = None
         self.raw_generator_runtime_tenths = None
+        self.ignored_generator_runtime_tenths = None
+        self.ignored_generator_runtime_reason = None
         self.raw_battery_state = None
         self._notify_listeners()
         self._listeners.clear()
@@ -528,9 +564,44 @@ class PrecisionPlexStateCoordinator:
         if not self.hass.loop.is_closed():
             self.hass.loop.call_soon_threadsafe(self._notify_listeners)
 
+    def _is_likely_shifted_02aa_frame(self, raw: bytes) -> bool:
+        """Return True when a 02AA telemetry frame appears one byte misaligned.
+
+        The normal coach telemetry frames observed during v4.3.x testing are
+        20-byte packets that commonly start with an alignment/status byte
+        followed by 0x87, for example:
+
+            00 87 00 0f 0f 50 00 04 b6 ... ae
+
+        A recurring bad notification was the same frame shifted left by one
+        byte, with the original terminator at byte 18 and an extra trailing
+        0x55, for example:
+
+            87 00 0f 0f 50 00 04 b6 ... ae 55
+
+        Decoding that shifted frame updates fixed-position entities from the
+        wrong bytes. Reject it before any entity state is touched.
+        """
+        return (
+            len(raw) == 20
+            and raw[0] in (0x87, 0x88, 0x86, 0x85, 0x84, 0x83, 0x82)
+            and raw[-2] in (0xAE, 0x9E, 0x4E, 0x3E, 0x9D, 0x4D, 0x3D, 0x50, 0x4F, 0x3F, 0x53, 0x51)
+            and raw[-1] == 0x55
+        )
+
     def _apply_battery_state(self, raw: bytes, source: str, sender: int | None = None) -> None:
         """Decode and store coach battery voltage and tank levels from 02AA telemetry."""
         if self._stopped or len(raw) < 2:
+            return
+
+        if self._is_likely_shifted_02aa_frame(raw):
+            _LOGGER.warning(
+                "Precision Plex rejected misaligned 02AA frame before decode from %s sender=%s raw_len=%s raw=%s",
+                source,
+                f"0x{sender:04X}" if isinstance(sender, int) else None,
+                len(raw),
+                raw.hex(" "),
+            )
             return
 
         raw_voltage = int.from_bytes(raw[0:2], "big")
@@ -671,7 +742,25 @@ class PrecisionPlexStateCoordinator:
             # the same command eligibility as normal stopped.
             generator_status_code = raw_generator_status & 0x7F
 
-            if raw_generator_status_word == 0x00A0:
+            runtime_high_byte = None
+            if self.raw_generator_runtime_tenths is not None:
+                runtime_high_byte = (self.raw_generator_runtime_tenths >> 8) & 0xFF
+
+            status_is_runtime_artifact = (
+                runtime_high_byte is not None
+                and raw_generator_status == runtime_high_byte
+                and (raw_generator_status_word & 0xFF)
+                == (self.raw_generator_runtime_tenths & 0xFF)
+            )
+
+            if status_is_runtime_artifact:
+                _LOGGER.debug(
+                    "Ignoring generator status artifact raw_status=0x%02X runtime=0x%04X raw_word=0x%04X",
+                    raw_generator_status,
+                    self.raw_generator_runtime_tenths,
+                    raw_generator_status_word,
+                )
+            elif raw_generator_status_word == 0x00A0:
                 self.generator_status_key = "auto_start_accepted"
                 self.generator_status = "AutoStart Accepted"
             elif raw_generator_status in (0x00, 0x40, 0x80, 0xC0):
@@ -701,8 +790,6 @@ class PrecisionPlexStateCoordinator:
                 self.generator_status_key = "will_not_start"
                 self.generator_status = "Will Not Start"
             else:
-                self.generator_status_key = f"unknown_0x{raw_generator_status:02X}"
-                self.generator_status = f"Unknown 0x{raw_generator_status:02X}"
                 _LOGGER.warning(
                     "Precision Plex unknown generator status raw_status=0x%02X decoded_status=0x%02X raw_word=0x%04X raw=%s",
                     raw_generator_status,
@@ -716,10 +803,142 @@ class PrecisionPlexStateCoordinator:
             self.generator_running = raw_generator_status in (0x10, 0x90)
 
             # Avoid overwriting the runtime with transitional command/status words
-            # like 0x00A0, which are not actual hour-counter values.
+            # like 0x00A0, which are not actual hour-counter values. v4.3.9 keeps
+            # the masked/runtime-stabilized decoder. Field diagnostics showed
+            # frames such as 0x04B6 and 0x60B6 where the low byte remained the real
+            # runtime low byte while status/flag bits contaminated the high byte.
             if raw_generator_status_word != 0x00A0:
-                self.raw_generator_runtime_tenths = raw_generator_runtime_tenths
-                self.generator_runtime_hours = raw_generator_runtime_tenths / 10
+                previous_runtime_tenths = self.raw_generator_runtime_tenths
+
+                b6 = raw[6] if len(raw) > 6 else None
+                b7 = raw[7] if len(raw) > 7 else None
+                b8 = raw[8] if len(raw) > 8 else None
+                b9 = raw[9] if len(raw) > 9 else None
+
+                candidate_6_8 = int.from_bytes(raw[6:8], "big") if len(raw) >= 8 else None
+                candidate_7_9 = int.from_bytes(raw[7:9], "big") if len(raw) >= 9 else None
+                candidate_8_10 = int.from_bytes(raw[8:10], "big") if len(raw) >= 10 else None
+                candidate_7_9_low12 = (((b7 or 0) & 0x0F) << 8 | (b8 or 0)) if b7 is not None and b8 is not None else None
+                candidate_7_9_low13 = (((b7 or 0) & 0x1F) << 8 | (b8 or 0)) if b7 is not None and b8 is not None else None
+                candidate_7_9_low14 = (((b7 or 0) & 0x3F) << 8 | (b8 or 0)) if b7 is not None and b8 is not None else None
+
+                previous_high_with_current_low = None
+                if previous_runtime_tenths is not None and b8 is not None:
+                    previous_high_with_current_low = ((previous_runtime_tenths >> 8) << 8) | b8
+
+                accepted_runtime_tenths = raw_generator_runtime_tenths
+                decode_mode = "raw_7_9"
+
+                # When the raw 16-bit candidate is implausible but the low byte is
+                # consistent with the previously accepted counter high byte, treat
+                # byte 7 as status/flag-contaminated and preserve the previous high
+                # byte. This is intentionally conservative: it only activates when
+                # there is already a valid previous runtime and the reconstructed
+                # value is monotonic with a plausible live delta.
+                if previous_high_with_current_low is not None:
+                    reconstructed_delta = previous_high_with_current_low - previous_runtime_tenths
+                    raw_delta = raw_generator_runtime_tenths - previous_runtime_tenths
+                    raw_implausible = (
+                        raw_generator_runtime_tenths > GENERATOR_RUNTIME_MAX_PLAUSIBLE_TENTHS
+                        or raw_delta > GENERATOR_RUNTIME_MAX_JUMP_TENTHS
+                    )
+                    reconstructed_plausible = (
+                        previous_high_with_current_low >= previous_runtime_tenths
+                        and reconstructed_delta <= GENERATOR_RUNTIME_MAX_JUMP_TENTHS
+                    )
+                    if raw_implausible and reconstructed_plausible:
+                        accepted_runtime_tenths = previous_high_with_current_low
+                        decode_mode = "previous_high_current_low"
+
+                ignore_runtime_reason: str | None = None
+                if accepted_runtime_tenths > GENERATOR_RUNTIME_MAX_PLAUSIBLE_TENTHS:
+                    ignore_runtime_reason = "implausibly_high"
+                elif previous_runtime_tenths is not None and accepted_runtime_tenths < previous_runtime_tenths:
+                    ignore_runtime_reason = "decreasing"
+                elif (
+                    previous_runtime_tenths is not None
+                    and accepted_runtime_tenths - previous_runtime_tenths
+                    > GENERATOR_RUNTIME_MAX_JUMP_TENTHS
+                ):
+                    ignore_runtime_reason = "implausible_jump"
+
+                decision = ignore_runtime_reason or "accepted"
+
+                previous_low_byte = (previous_runtime_tenths & 0xFF) if previous_runtime_tenths is not None else None
+                low_byte_delta = (b8 - previous_low_byte) if b8 is not None and previous_low_byte is not None else None
+
+                # v4.4.0 diagnostic: identify which same-shaped generator telemetry
+                # variants are true hour-counter packets. Field captures show several
+                # valid-looking frames where byte 8 changes through values such as
+                # 0x0B, 0x16, 0x2D, 0x5B, and 0xB6. Only some of those appear to be
+                # the persistent generator runtime source. Keep normal behavior, but
+                # promote variant changes to the log so field testing can correlate
+                # the byte-8 family with generator state and packet context.
+                runtime_variant_changed = (
+                    previous_low_byte is not None
+                    and b8 is not None
+                    and b8 != previous_low_byte
+                )
+                runtime_variant_interesting = (
+                    decision != "accepted"
+                    or decode_mode != "raw_7_9"
+                    or runtime_variant_changed
+                    or raw_generator_status_word not in (0x0004, 0x4004, 0x8004, 0xC004)
+                )
+
+                if runtime_variant_interesting:
+                    _LOGGER.warning(
+                        "Precision Plex generator runtime source diagnostic decision=%s decode_mode=%s stored_runtime_tenths=%s candidate_runtime_tenths=%s previous_runtime_tenths=%s previous_low_byte=%s current_low_byte=%s low_byte_delta=%s raw_status=0x%02X raw_word=0x%04X generator_status_key=%s generator_running=%s bytes_6_12=%s,%s,%s,%s,%s,%s,%s candidate_6_8=%s candidate_7_9=%s candidate_8_10=%s candidate_7_9_low12=%s candidate_7_9_low13=%s candidate_7_9_low14=%s previous_high_with_current_low=%s raw_len=%s raw=%s",
+                        decision,
+                        decode_mode,
+                        accepted_runtime_tenths if ignore_runtime_reason is None else previous_runtime_tenths,
+                        raw_generator_runtime_tenths,
+                        previous_runtime_tenths,
+                        f"0x{previous_low_byte:02X}" if previous_low_byte is not None else None,
+                        f"0x{b8:02X}" if b8 is not None else None,
+                        low_byte_delta,
+                        raw_generator_status,
+                        raw_generator_status_word,
+                        self.generator_status_key,
+                        self.generator_running,
+                        f"0x{raw[6]:02X}" if len(raw) > 6 else None,
+                        f"0x{raw[7]:02X}" if len(raw) > 7 else None,
+                        f"0x{raw[8]:02X}" if len(raw) > 8 else None,
+                        f"0x{raw[9]:02X}" if len(raw) > 9 else None,
+                        f"0x{raw[10]:02X}" if len(raw) > 10 else None,
+                        f"0x{raw[11]:02X}" if len(raw) > 11 else None,
+                        f"0x{raw[12]:02X}" if len(raw) > 12 else None,
+                        candidate_6_8,
+                        candidate_7_9,
+                        candidate_8_10,
+                        candidate_7_9_low12,
+                        candidate_7_9_low13,
+                        candidate_7_9_low14,
+                        previous_high_with_current_low,
+                        len(raw),
+                        raw.hex(" "),
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Precision Plex generator runtime source diagnostic decision=%s decode_mode=%s stored_runtime_tenths=%s candidate_runtime_tenths=%s previous_runtime_tenths=%s raw_status=0x%02X raw_word=0x%04X raw=%s",
+                        decision,
+                        decode_mode,
+                        accepted_runtime_tenths,
+                        raw_generator_runtime_tenths,
+                        previous_runtime_tenths,
+                        raw_generator_status,
+                        raw_generator_status_word,
+                        raw.hex(" "),
+                    )
+
+                if ignore_runtime_reason is None:
+                    self.raw_generator_runtime_tenths = accepted_runtime_tenths
+                    self.generator_runtime_hours = accepted_runtime_tenths / 10
+                    self.ignored_generator_runtime_tenths = None
+                    self.ignored_generator_runtime_reason = None
+                else:
+                    self.ignored_generator_runtime_tenths = raw_generator_runtime_tenths
+                    self.ignored_generator_runtime_reason = ignore_runtime_reason
 
             self.raw_battery_state = raw
             self.available = True

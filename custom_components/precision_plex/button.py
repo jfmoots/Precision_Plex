@@ -11,6 +11,7 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -164,7 +165,7 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
         return {
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
-            "name": self.entry.title,
+            "name": "Precision Plex",
             "manufacturer": "Precision Circuits",
             "model": "Precision Plex Wireless TP Monitor",
         }
@@ -200,6 +201,7 @@ class PrecisionPlexCoverUtilityButton(ButtonEntity):
     """Jog or reset a Precision Plex cover while preserving estimated position logic."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
@@ -253,7 +255,7 @@ class PrecisionPlexCoverUtilityButton(ButtonEntity):
         return {
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
-            "name": self.entry.title,
+            "name": "Precision Plex",
             "manufacturer": "Precision Circuits",
             "model": "Precision Plex Wireless TP Monitor",
         }

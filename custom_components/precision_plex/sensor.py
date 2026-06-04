@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfElectricPotential, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -27,6 +28,10 @@ async def async_setup_entry(
             PrecisionPlexGreyWaterTankSensor(coordinator, entry),
             PrecisionPlexBlackWaterTankSensor(coordinator, entry),
             PrecisionPlexLPGasTankSensor(coordinator, entry),
+            PrecisionPlexFreshWaterHomeKitSensor(coordinator, entry),
+            PrecisionPlexGreyWaterHomeKitSensor(coordinator, entry),
+            PrecisionPlexBlackWaterHomeKitSensor(coordinator, entry),
+            PrecisionPlexPropaneHomeKitSensor(coordinator, entry),
             PrecisionPlexGeneratorRuntimeSensor(coordinator, entry),
             PrecisionPlexGeneratorStatusSensor(coordinator, entry),
         ]
@@ -67,7 +72,7 @@ class PrecisionPlexBaseSensor(SensorEntity):
         return {
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
-            "name": self.entry.title,
+            "name": "Precision Plex",
             "manufacturer": "Precision Circuits",
             "model": "Precision Plex Wireless TP Monitor",
         }
@@ -119,6 +124,7 @@ class PrecisionPlexFreshWaterTankSensor(PrecisionPlexBaseSensor):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:water-percent"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the Fresh Water tank sensor."""
@@ -160,6 +166,7 @@ class PrecisionPlexGreyWaterTankSensor(PrecisionPlexBaseSensor):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:water-percent"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the Grey Water tank sensor."""
@@ -201,6 +208,7 @@ class PrecisionPlexBlackWaterTankSensor(PrecisionPlexBaseSensor):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:water-percent"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the Black Water tank sensor."""
@@ -242,6 +250,7 @@ class PrecisionPlexLPGasTankSensor(PrecisionPlexBaseSensor):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:propane-tank"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the LP Gas tank sensor."""
@@ -280,8 +289,9 @@ class PrecisionPlexGeneratorRuntimeSensor(PrecisionPlexBaseSensor):
     """Generator runtime decoded from Precision Plex 02AA telemetry."""
 
     _attr_name = "Generator Runtime"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_native_unit_of_measurement = UnitOfTime.HOURS
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:timer-outline"
     _attr_suggested_display_precision = 1
 
@@ -309,8 +319,11 @@ class PrecisionPlexGeneratorRuntimeSensor(PrecisionPlexBaseSensor):
             "source_characteristic": "02AA",
             "source_field": "bytes 7-8 big-endian tenths of hours",
             "raw_runtime_tenths": self.coordinator.raw_generator_runtime_tenths,
+            "ignored_runtime_tenths": self.coordinator.ignored_generator_runtime_tenths,
+            "ignored_runtime_reason": self.coordinator.ignored_generator_runtime_reason,
             "raw_02aa": raw.hex(" ") if raw is not None else None,
             "mapping": "0x04B4=1204 tenths=120.4 hours",
+            "guard": "ignore >1000.0h, decreases, or jumps over 5.0h between accepted samples",
         }
 
 
@@ -318,6 +331,7 @@ class PrecisionPlexGeneratorStatusSensor(PrecisionPlexBaseSensor):
     """Generator status decoded from Precision Plex 02AA telemetry."""
 
     _attr_name = "Generator Status"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:generator-stationary"
 
     def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
@@ -358,3 +372,52 @@ class PrecisionPlexGeneratorStatusSensor(PrecisionPlexBaseSensor):
             "raw_02aa": raw.hex(" ") if raw is not None else None,
             "mapping": "0004=Stopped, 1004=Running, 00A0=AutoStart Accepted, 2004=Will Not Start, 6004=Performing Generator AutoStart, 7004=Performing Generator AutoStop",
         }
+
+class PrecisionPlexHomeKitLevelSensor(PrecisionPlexBaseSensor):
+    """HomeKit-friendly humidity percentage sensor."""
+
+    # Exact friendly names for HomeKit-facing helper sensors.
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.HUMIDITY
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+class PrecisionPlexFreshWaterHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
+    _attr_name = "Fresh Water"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_fresh_water_homekit"
+    @property
+    def native_value(self): return self.coordinator.fresh_water_level
+    @property
+    def available(self): return self.coordinator.available and self.coordinator.fresh_water_level is not None
+
+class PrecisionPlexGreyWaterHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
+    _attr_name = "Grey Tank"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_grey_water_homekit"
+    @property
+    def native_value(self): return self.coordinator.grey_water_level
+    @property
+    def available(self): return self.coordinator.available and self.coordinator.grey_water_level is not None
+
+class PrecisionPlexBlackWaterHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
+    _attr_name = "Black Tank"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_black_water_homekit"
+    @property
+    def native_value(self): return self.coordinator.black_water_level
+    @property
+    def available(self): return self.coordinator.available and self.coordinator.black_water_level is not None
+
+class PrecisionPlexPropaneHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
+    _attr_name = "Propane"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_propane_homekit"
+    @property
+    def native_value(self): return self.coordinator.lp_gas_level
+    @property
+    def available(self): return self.coordinator.available and self.coordinator.lp_gas_level is not None

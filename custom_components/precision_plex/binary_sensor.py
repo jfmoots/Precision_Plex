@@ -8,6 +8,7 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass, Bina
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, STATE_BITS
@@ -33,6 +34,7 @@ class PrecisionPlexStateBinarySensor(BinarySensorEntity):
     """Read-only binary sensor decoded from 02BB state bitmap."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -93,7 +95,7 @@ class PrecisionPlexStateBinarySensor(BinarySensorEntity):
         return {
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
-            "name": self.entry.title,
+            "name": "Precision Plex",
             "manufacturer": "Precision Circuits",
             "model": "Precision Plex Wireless TP Monitor",
         }
@@ -121,6 +123,7 @@ class PrecisionPlexGeneratorRunningBinarySensor(BinarySensorEntity):
     """Generator running status decoded from Precision Plex 02AA telemetry."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_name = "Generator Running"
     _attr_device_class = BinarySensorDeviceClass.RUNNING
 
@@ -164,7 +167,7 @@ class PrecisionPlexGeneratorRunningBinarySensor(BinarySensorEntity):
         return {
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
-            "name": self.entry.title,
+            "name": "Precision Plex",
             "manufacturer": "Precision Circuits",
             "model": "Precision Plex Wireless TP Monitor",
         }

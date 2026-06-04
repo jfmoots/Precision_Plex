@@ -70,6 +70,19 @@ class PrecisionPlexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._address = user_input[CONF_ADDRESS]
             self._title = devices.get(self._address, f"Precision Plex {self._address}")
+
+            if await self._async_is_already_paired(self._address):
+                _LOGGER.info(
+                    "Precision Plex %s is already paired/bonded in BlueZ; skipping pairing flow",
+                    self._address,
+                )
+                await self.async_set_unique_id(self._address)
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(
+                    title=self._title or f"Precision Plex {self._address}",
+                    data={CONF_ADDRESS: self._address},
+                )
+
             return await self.async_step_pair()
 
         return self.async_show_form(
@@ -130,6 +143,128 @@ class PrecisionPlexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "address": getattr(self, "_address", "unknown"),
             },
         )
+
+    async def _async_is_already_paired(self, address):
+        """Return True if BlueZ already has this device paired or bonded.
+
+        Home Assistant's Bluetooth discovery object does not reliably expose
+        BlueZ pairing/bonding state. Query BlueZ Device1 properties directly
+        for the selected MAC address and unwrap dbus-fast Variant values.
+        """
+        from dbus_fast import BusType  # pylint: disable=import-outside-toplevel
+        from dbus_fast.aio import MessageBus  # pylint: disable=import-outside-toplevel
+
+        def _unwrap(value):
+            """Unwrap dbus-fast Variant values when present."""
+            return getattr(value, "value", value)
+
+        def _as_bool(value):
+            """Convert BlueZ boolean-ish property values to real bools."""
+            value = _unwrap(value)
+            if isinstance(value, str):
+                return value.lower() in {"1", "true", "yes", "on"}
+            return bool(value)
+
+        bus = None
+        normalized_address = address.upper()
+        bluez_device_suffix = normalized_address.replace(":", "_")
+
+        try:
+            bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+
+            # First try the deterministic BlueZ object path. This avoids any
+            # ambiguity if discovery has multiple Precision Plex advertisements.
+            for adapter in ("hci0", "hci1"):
+                device_path = f"/org/bluez/{adapter}/dev_{bluez_device_suffix}"
+                try:
+                    introspection = await bus.introspect(BLUEZ_SERVICE, device_path)
+                    proxy = bus.get_proxy_object(BLUEZ_SERVICE, device_path, introspection)
+                    props = proxy.get_interface("org.freedesktop.DBus.Properties")
+
+                    paired = _as_bool(
+                        await props.call_get("org.bluez.Device1", "Paired")
+                    )
+                    bonded = _as_bool(
+                        await props.call_get("org.bluez.Device1", "Bonded")
+                    )
+                    trusted = _as_bool(
+                        await props.call_get("org.bluez.Device1", "Trusted")
+                    )
+
+                    _LOGGER.warning(
+                        "Precision Plex BlueZ pairing check address=%s path=%s paired=%s bonded=%s trusted=%s",
+                        normalized_address,
+                        device_path,
+                        paired,
+                        bonded,
+                        trusted,
+                    )
+                    if paired or bonded:
+                        return True
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "Precision Plex BlueZ direct pairing check failed for %s at %s: %r",
+                        normalized_address,
+                        device_path,
+                        err,
+                    )
+
+            # Fall back to ObjectManager enumeration. This catches systems where
+            # the adapter is not hci0/hci1 or the path was not available yet.
+            introspection = await bus.introspect(BLUEZ_SERVICE, "/")
+            root_obj = bus.get_proxy_object(BLUEZ_SERVICE, "/", introspection)
+            object_manager = root_obj.get_interface(
+                "org.freedesktop.DBus.ObjectManager"
+            )
+            objects = await object_manager.call_get_managed_objects()
+
+            for path, interfaces in objects.items():
+                device = interfaces.get("org.bluez.Device1")
+                if not device:
+                    continue
+
+                props_address = str(_unwrap(device.get("Address", ""))).upper()
+                if props_address != normalized_address:
+                    continue
+
+                paired = _as_bool(device.get("Paired", False))
+                bonded = _as_bool(device.get("Bonded", False))
+                trusted = _as_bool(device.get("Trusted", False))
+
+                _LOGGER.warning(
+                    "Precision Plex BlueZ pairing check address=%s path=%s paired=%s bonded=%s trusted=%s",
+                    normalized_address,
+                    path,
+                    paired,
+                    bonded,
+                    trusted,
+                )
+                return paired or bonded
+
+            _LOGGER.warning(
+                "Precision Plex BlueZ pairing check address=%s not found; Pair with Mobile required",
+                normalized_address,
+            )
+            return False
+
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning(
+                "Precision Plex could not query BlueZ pairing status for %s; Pair with Mobile required: %r",
+                normalized_address,
+                err,
+                exc_info=True,
+            )
+            return False
+
+        finally:
+            if bus is not None:
+                try:
+                    bus.disconnect()
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "Precision Plex BlueZ pairing status bus disconnect failed: %r",
+                        err,
+                    )
 
     async def _async_pair_and_prime(self, address):
         """Register a BlueZ agent, pair during connect, then send app init."""
