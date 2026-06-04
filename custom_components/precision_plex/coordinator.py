@@ -29,9 +29,9 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-CONNECT_TIMEOUT = 20.0
+CONNECT_TIMEOUT = 12.0
 GATT_TIMEOUT = 8.0
-RECONNECT_DELAY_SECONDS = 15.0
+RECONNECT_DELAY_SECONDS = 4.0
 GENERATOR_RUNTIME_MAX_PLAUSIBLE_TENTHS = 10000  # 1000.0 hours; protects against misdecoded 02AA frames
 GENERATOR_RUNTIME_MAX_JUMP_TENTHS = 50  # 5.0 hours between accepted samples is implausible for live telemetry
 
@@ -263,12 +263,17 @@ class PrecisionPlexStateCoordinator:
 
         _LOGGER.info("Precision Plex monitor connecting to %s", self.address)
 
+        # Use one Bleak/BlueZ attempt per coordinator loop iteration.
+        # The controller can disconnect during service discovery; allowing
+        # bleak-retry-connector to perform multiple long attempts in one call
+        # delays entity availability after startup. The outer loop retries
+        # quickly instead.
         self._client = await establish_connection(
             BleakClientWithServiceCache,
             ble_device,
             self.address,
             self._disconnected_callback,
-            max_attempts=3,
+            max_attempts=1,
             timeout=CONNECT_TIMEOUT,
         )
 
