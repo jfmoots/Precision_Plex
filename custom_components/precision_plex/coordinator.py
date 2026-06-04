@@ -23,6 +23,8 @@ from .const import (
     BATTERY_CHARACTERISTIC_UUID,
     CONTROL_CHARACTERISTIC_UUID,
     COACH_BATTERY_NOTIFY_HANDLE,
+    DEFAULT_PROFILE_ID,
+    get_profile,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,6 +50,8 @@ class PrecisionPlexStateCoordinator:
         self.hass = hass
         self.entry = entry
         self.address: str = entry.data[CONF_ADDRESS]
+        self.profile_id: str = entry.options.get("coach_profile", DEFAULT_PROFILE_ID)
+        self.profile = get_profile(self.profile_id)
 
         self.state_word: int | None = None
         self.state_words: list[int] = []

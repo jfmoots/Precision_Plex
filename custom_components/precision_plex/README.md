@@ -4,7 +4,7 @@ A custom Home Assistant integration for Precision Circuits Precision Plex system
 
 ## Current Recommended Release
 
-**v4.0.3** is the current GitHub-ready release.
+**v4.1.0** is the current GitHub-ready release.
 
 This release builds on the validated v3.0.0 cover and generator work by adding configurable manual jog controls and position reset buttons for all slide and awning covers. For the tested coach, the integration covers the major Precision Plex functions that are visible in the Precision Plex mobile app.
 
@@ -40,6 +40,16 @@ hvacSendsHeatPumpBits false
 ```
 
 This confirms that HVAC support is disabled by the official app for this coach profile.
+
+## Coach Profile Architecture
+
+v4.1.0 introduces a coach profile foundation. The Georgetown GT5 34M5 mappings that were previously hardcoded in the integration now live in:
+
+```text
+custom_components/precision_plex/profiles/georgetown_gt5_34m5.py
+```
+
+This release intentionally keeps the default profile locked to the tested Georgetown GT5 34M5 behavior. Entity names, unique IDs, BLE commands, decoded state bits, and timing defaults are preserved from v4.0.3. The profile structure is a compatibility-safe foundation for adding other Precision Plex coach layouts later.
 
 ## Implemented Precision Plex Features
 
@@ -170,7 +180,7 @@ These match the characteristic families used by the Home Assistant integration f
 
 ## Confirmed Working Feature Set
 
-Tested and working as of **v4.0.3**.
+Tested and working as of **v4.1.0**.
 
 ### Controls
 

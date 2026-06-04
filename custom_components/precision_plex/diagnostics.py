@@ -12,7 +12,10 @@ from homeassistant.core import HomeAssistant
 from .const import (
     BATTERY_CHARACTERISTIC_UUID,
     CONTROL_CHARACTERISTIC_UUID,
+    COACH_PROFILE,
+    COACH_PROFILE_ID,
     DOMAIN,
+    PROFILES,
     PAIRING_CHARACTERISTIC_UUID,
     STATE_BITS,
     STATE_CHARACTERISTIC_UUID,
@@ -55,6 +58,14 @@ def _state_bit_diagnostics(coordinator: Any) -> dict[str, Any]:
         }
 
     return decoded
+
+
+def _active_profile_name(coordinator: Any) -> str | None:
+    """Return the active profile name for diagnostics."""
+    profile = getattr(coordinator, "profile", None) or COACH_PROFILE
+    if isinstance(profile, dict):
+        return profile.get("name")
+    return None
 
 
 def _client_diagnostics(coordinator: Any) -> dict[str, Any]:
@@ -122,6 +133,12 @@ async def async_get_config_entry_diagnostics(
             "title": entry.title,
             "data": dict(entry.data),
             "options": dict(entry.options),
+        },
+        "profile": {
+            "active_profile_id": getattr(coordinator, "profile_id", COACH_PROFILE_ID),
+            "active_profile_name": _active_profile_name(coordinator),
+            "default_profile_id": COACH_PROFILE_ID,
+            "available_profile_ids": sorted(PROFILES),
         },
         "coordinator": {
             "available": getattr(coordinator, "available", None),

@@ -1,5 +1,13 @@
 # Release History
 
+## v4.1.0 — Coach Profile Foundation
+
+- Added the first coach profile architecture.
+- Moved Georgetown GT5 34M5 state-bit and command mappings into `custom_components/precision_plex/profiles/georgetown_gt5_34m5.py`.
+- Kept the Georgetown GT5 34M5 profile as the default active profile to preserve v4.0.3 behavior.
+- Added active profile information to diagnostics.
+
+
 ## v4.0.3 — Cleanup & Diagnostics
 
 - Added Home Assistant diagnostics support for redacted config, BLE connection details, raw 02BB/02AA frames, decoded state bits, tank/LP percentages, coach voltage, and generator status/runtime.
