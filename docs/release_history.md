@@ -1,5 +1,11 @@
 # Release History
 
+## v4.0.3 — Cleanup & Diagnostics
+
+- Added Home Assistant diagnostics support for redacted config, BLE connection details, raw 02BB/02AA frames, decoded state bits, tank/LP percentages, coach voltage, and generator status/runtime.
+- Updated package version and README references to v4.0.3.
+- Removed generated Python cache files from the GitHub-ready ZIP.
+
 ## v2.6.33 - Feature Complete Release with Official App Protocol Documentation
 
 - Promotes v2.6.32 into an expanded GitHub-ready release.

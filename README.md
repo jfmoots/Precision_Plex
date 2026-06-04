@@ -4,7 +4,7 @@ A custom Home Assistant integration for Precision Circuits Precision Plex system
 
 ## Current Recommended Release
 
-**v4.0.0** is the current GitHub-ready release.
+**v4.0.3** is the current GitHub-ready release.
 
 This release builds on the validated v3.0.0 cover and generator work by adding configurable manual jog controls and position reset buttons for all slide and awning covers. For the tested coach, the integration covers the major Precision Plex functions that are visible in the Precision Plex mobile app.
 
@@ -170,7 +170,7 @@ These match the characteristic families used by the Home Assistant integration f
 
 ## Confirmed Working Feature Set
 
-Tested and working as of **v4.0.0**.
+Tested and working as of **v4.0.3**.
 
 ### Controls
 

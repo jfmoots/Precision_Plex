@@ -1,1 +1,1 @@
-Precision Plex for Home Assistant v4.0.2 — Button Availability & Generator Idle-State Fixes
+Precision Plex v4.0.3 — Cleanup & Diagnostics
