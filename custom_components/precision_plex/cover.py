@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.cover import CoverEntity, CoverEntityFeature
+from homeassistant.components.cover import CoverDeviceClass, CoverEntity, CoverEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
@@ -133,14 +133,21 @@ async def async_setup_entry(
 ) -> None:
     """Set up Precision Plex cover entities."""
     coordinator: PrecisionPlexStateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        PrecisionPlexTimedCover(coordinator, entry, description)
-        for description in COVERS
-    )
+    entities = []
+    for description in COVERS:
+        # v4.2.4 stops creating the preserved legacy cover entities.
+        # The jog/calibration/timing controls remain available, and the clean
+        # native covers are now the only cover entities created by the platform.
+        entities.append(PrecisionPlexCleanNativeCover(coordinator, entry, description))
+
+    async_add_entities(entities)
 
 
 class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
-    """Precision Plex cover using app-like press-and-hold BLE packets."""
+    """Native Home Assistant cover entity using app-like press-and-hold BLE packets.
+
+    Legacy jog and calibration buttons remain available on the same device.
+    """
 
     _attr_has_entity_name = True
     _attr_supported_features = (
@@ -160,8 +167,13 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self.coordinator = coordinator
         self.entry = entry
         self._plex_description = description
-        self._attr_name = description.name
+        # Legacy cover entities are preserved for backward compatibility,
+        # but new installs should use the clean native cover entities instead.
+        self._attr_name = f"{description.name} Legacy"
         self._attr_unique_id = f"{coordinator.address}_{description.key}_cover"
+        self._attr_entity_registry_enabled_default = False
+        if description.key == "awning":
+            self._attr_device_class = CoverDeviceClass.AWNING
         self._remove_listener = None
         self._command_lock = asyncio.Lock()
         self._hold_task: asyncio.Task | None = None
@@ -295,6 +307,11 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             "close_full_seconds": self._in_full_seconds(),
             "hold_interval_seconds": HOLD_INTERVAL_SECONDS,
             "jog_seconds": self._jog_seconds(),
+            "native_cover_entity": False,
+            "legacy_cover_entity": True,
+            "replacement_entity": f"{self._plex_description.name}",
+            "legacy_jog_buttons_available": True,
+            "legacy_calibration_buttons_available": True,
         }
 
     async def async_open_cover(self, **kwargs: Any) -> None:
@@ -671,3 +688,46 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
     def _clamp_position(self) -> None:
         """Clamp estimated position."""
         self._estimated_position = max(0.0, min(100.0, self._estimated_position))
+
+
+
+
+class PrecisionPlexCleanNativeCover(PrecisionPlexTimedCover):
+    """Clean native cover entity exposed alongside the original legacy cover.
+
+    The original cover unique IDs are intentionally preserved by
+    PrecisionPlexTimedCover. This class creates new, cleanly named entities for
+    Home Assistant dashboards and HomeKit without forcing a migration.
+    """
+
+    _attr_has_entity_name = False
+
+    def __init__(
+        self,
+        coordinator: PrecisionPlexStateCoordinator,
+        entry: ConfigEntry,
+        description: PrecisionPlexCoverDescription,
+    ) -> None:
+        """Initialize the clean native cover."""
+        super().__init__(coordinator, entry, description)
+        self._attr_name = description.name
+        self._attr_unique_id = f"{coordinator.address}_{description.key}_native_cover"
+        self._attr_entity_registry_enabled_default = True
+        self._attr_translation_key = None
+        if description.key != "awning":
+            # RV slides do not have a perfect Home Assistant device class.
+            # Leaving them generic avoids the misleading window icon.
+            self._attr_device_class = None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return diagnostic attributes."""
+        attrs = super().extra_state_attributes
+        attrs.update(
+            {
+                "native_cover_entity": True,
+                "clean_homekit_entity": True,
+                "legacy_cover_entity_preserved": True,
+            }
+        )
+        return attrs

@@ -1,3 +1,10 @@
+## v4.2.0 — Native Cover Entities
+
+- Promoted the awning and slide controls as the primary native Home Assistant cover interface.
+- Kept existing cover unique IDs and legacy jog/calibration controls for compatibility.
+- Added the awning device class to improve UI/HomeKit presentation.
+- Added explicit diagnostic attributes identifying native cover entities and preserved legacy support.
+
 # Release History
 
 ## v4.1.0 — Coach Profile Foundation
@@ -144,3 +151,9 @@
 - Promoted the successful Precision Plex pairing workflow validated against the `Precision - D244B4` BLE endpoint.
 - Confirmed pairing occurs through standard BLE SMP bonding/security, followed by the existing app/session initialization payload.
 
+
+
+## v4.2.1
+
+- Added clean native cover entities alongside the original preserved cover entities.
+- Intended for cleaner Home Assistant and HomeKit naming without breaking existing dashboards or automations.
