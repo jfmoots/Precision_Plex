@@ -4,20 +4,74 @@ A custom Home Assistant integration for Precision Circuits Precision Plex system
 
 ## Current Recommended Release
 
-**v4.5.3** is the current GitHub-ready stable baseline release.
+**v5.0.0** is the current GitHub-ready major release.
 
-This release focuses on telemetry validation and long-term stability. It keeps the complete feature set from the prior Precision Plex integration releases while adding production-grade validation for noisy or malformed BLE telemetry. The integration now rejects invalid propane samples, protects generator runtime from corrupted candidates, collapses generator flag variants into clean user-facing states, and removes the temporary overnight diagnostic log chatter used during protocol analysis.
+v5.0.0 is the first complete Precision Plex Home Assistant ecosystem release. It keeps the validated v4.5.3 telemetry-stability foundation and adds a full mobile dashboard example, dashboard screenshots, dashboard data-source documentation, and a polished project presentation suitable for GitHub users who want to see what a finished RV control dashboard can look like.
 
-
-### v4.5.3 Log Cleanup Follow-Up
-
-v4.5.3 keeps the v4.5.0/v4.5.1 telemetry validation foundation and removes remaining reverse-engineering diagnostic startup chatter. The generator runtime recovery logic remains in place, but its candidate-selection diagnostic message has been removed from normal logging. The 02AA and 02BB subscription confirmations are retained as normal informational startup events.
+The integration remains focused on Precision Plex BLE control and telemetry. The included dashboard demonstrates a broader real-world RV Home Assistant installation that also uses Shelly devices and standard Home Assistant integrations alongside Precision Plex.
 
 ## Tested Coach and Scope
 
 This integration was reverse engineered from a Precision Plex system installed in a **2022 Forest River Georgetown GT5 34M5 Motorhome**.
 
 The current implementation should be considered **feature complete for the app-visible Precision Plex functions available on this tested coach**. Other Precision Plex-equipped coaches may expose different features, circuits, slides, tanks, generator options, or app configuration profiles.
+
+## Mobile Dashboard Example
+
+v5.0.0 includes a complete mobile-friendly Home Assistant dashboard example:
+
+```text
+dashboard/mooterhome_mobile.yaml
+```
+
+The dashboard is optimized for iPhone and Android devices and demonstrates a practical RV control layout for:
+
+- Tank monitoring
+- Water pump and water heater controls
+- Lighting controls
+- Slide and awning controls
+- Generator status and AutoStart/AutoStop controls
+- Battery monitoring
+- Environment monitoring
+- Service and calibration controls
+
+### Dashboard Screenshots
+
+#### Home
+
+![Home Dashboard](docs/dashboard_home.png)
+
+#### Lights
+
+![Lights Dashboard](docs/dashboard_lights.png)
+
+#### Slides
+
+![Slides Dashboard](docs/dashboard_slides.png)
+
+#### Generator
+
+![Generator Dashboard](docs/dashboard_generator.png)
+
+#### Resources
+
+![Resources Dashboard](docs/dashboard_resources.png)
+
+#### Environment
+
+![Environment Dashboard](docs/dashboard_environment.png)
+
+Service controls are also included in the example dashboard and documented in `docs/mobile_dashboard.md`.
+
+### Dashboard Data Sources
+
+The dashboard shows a complete RV Home Assistant installation. Not every entity shown in the dashboard screenshots is created by the Precision Plex integration.
+
+Precision Plex provides the tanks, water pump, water heater, generator telemetry and controls, slides, patio awning, house battery voltage, and Precision Plex awning light.
+
+The author's example installation also includes Shelly-based interior lighting, Shelly UNI coach/chassis battery monitoring, Shelly environmental monitoring, and Raspberry Pi system temperature monitoring. Users should customize the dashboard YAML to match their own entity IDs and installed devices.
+
+See `docs/mobile_dashboard.md` for details.
 
 ### Coach Profile Observed in Official App Diagnostics
 

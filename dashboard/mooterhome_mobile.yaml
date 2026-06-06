@@ -1,0 +1,673 @@
+# Mooterhome Mobile Dashboard Example
+#
+# This dashboard is a mobile-friendly Home Assistant dashboard used with the
+# Precision Plex integration on a 2022 Forest River Georgetown GT5 34M5.
+#
+# It intentionally demonstrates a complete RV Home Assistant installation,
+# not only entities created by the Precision Plex integration.
+#
+# Non-Precision Plex example entities in this dashboard include:
+# - Interior lights exposed through Shelly relays
+# - Coach/chassis battery voltage from a Shelly UNI
+# - Living room temperature/humidity from a Shelly environmental sensor
+# - Raspberry Pi temperature from the Home Assistant System Monitor integration
+#
+# Replace entity IDs with the matching entities from your own installation.
+
+title: Mooterhome Mobile
+views:
+  - title: Home
+    path: home
+    icon: mdi:rv-truck
+    cards:
+      - square: false
+        type: grid
+        columns: 2
+        cards:
+          - type: gauge
+            entity: sensor.basement_precision_plex_fresh_water
+            name: Fresh
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 0
+              yellow: 33
+              red: 67
+          - type: gauge
+            entity: sensor.basement_precision_plex_grey_tank
+            name: Grey
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 0
+              yellow: 33
+              red: 67
+          - type: gauge
+            entity: sensor.basement_precision_plex_black_tank
+            name: Black
+            min: 0
+            max: 100
+            severity:
+              green: 0
+              yellow: 33
+              red: 67
+            needle: true
+          - type: gauge
+            entity: sensor.basement_precision_plex_propane
+            name: Propane
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 50
+              yellow: 25
+              red: 0
+      - type: horizontal-stack
+        cards:
+          - type: conditional
+            conditions:
+              - entity: switch.basement_precision_plex_water_pump
+                state: "on"
+            card:
+              type: button
+              entity: switch.basement_precision_plex_water_pump
+              name: Water Pump
+              icon: mdi:water-pump
+              color: green
+              show_name: true
+              show_icon: true
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: switch.basement_precision_plex_water_pump
+                state_not: "on"
+            card:
+              type: button
+              entity: switch.basement_precision_plex_water_pump
+              name: Water Pump
+              icon: mdi:water-pump-off
+              color: disabled
+              show_name: true
+              show_icon: true
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: switch.basement_precision_plex_water_heater
+                state: "on"
+            card:
+              type: button
+              entity: switch.basement_precision_plex_water_heater
+              name: Water Heater
+              icon: mdi:water-boiler
+              color: orange
+              show_name: true
+              show_icon: true
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: switch.basement_precision_plex_water_heater
+                state_not: "on"
+            card:
+              type: button
+              entity: switch.basement_precision_plex_water_heater
+              name: Water Heater
+              icon: mdi:water-boiler-off
+              color: disabled
+              show_name: true
+              show_icon: true
+              show_state: true
+              tap_action:
+                action: toggle
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: button
+            entity: sensor.coach_battery_voltmeter
+            name: Coach Battery
+            icon: mdi:car-battery
+            color: green
+            show_state: true
+            tap_action:
+              action: more-info
+          - type: button
+            entity: sensor.basement_precision_plex_coach_battery
+            name: House Battery
+            icon: mdi:battery-high
+            color: green
+            show_state: true
+            tap_action:
+              action: more-info
+          - type: conditional
+            conditions:
+              - entity: binary_sensor.basement_precision_plex_generator_running
+                state: "on"
+            card:
+              type: button
+              entity: sensor.basement_precision_plex_generator_runtime
+              name: Generator
+              icon: mdi:engine
+              color: red
+              show_state: true
+              tap_action:
+                action: more-info
+          - type: conditional
+            conditions:
+              - entity: binary_sensor.basement_precision_plex_generator_running
+                state_not: "on"
+            card:
+              type: button
+              entity: sensor.basement_precision_plex_generator_runtime
+              name: Generator
+              icon: mdi:engine-off
+              color: disabled
+              show_state: true
+              tap_action:
+                action: more-info
+  - title: Lights
+    path: lights
+    icon: mdi:lightbulb-group
+    cards:
+      - square: false
+        type: grid
+        columns: 3
+        cards:
+          - type: conditional
+            conditions:
+              - entity: light.living_room_overhead_light
+                state: "on"
+            card:
+              type: button
+              entity: light.living_room_overhead_light
+              name: Living
+              icon: mdi:lightbulb-on
+              color: yellow
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.living_room_overhead_light
+                state_not: "on"
+            card:
+              type: button
+              entity: light.living_room_overhead_light
+              name: Living
+              icon: mdi:lightbulb-off
+              color: disabled
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.dining_room_overhead_light
+                state: "on"
+            card:
+              type: button
+              entity: light.dining_room_overhead_light
+              name: Dining
+              icon: mdi:lightbulb-on
+              color: yellow
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.dining_room_overhead_light
+                state_not: "on"
+            card:
+              type: button
+              entity: light.dining_room_overhead_light
+              name: Dining
+              icon: mdi:lightbulb-off
+              color: disabled
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.bathroom_overhead_light
+                state: "on"
+            card:
+              type: button
+              entity: light.bathroom_overhead_light
+              name: Bath
+              icon: mdi:lightbulb-on
+              color: yellow
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.bathroom_overhead_light
+                state_not: "on"
+            card:
+              type: button
+              entity: light.bathroom_overhead_light
+              name: Bath
+              icon: mdi:lightbulb-off
+              color: disabled
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.vanity_light
+                state: "on"
+            card:
+              type: button
+              entity: light.vanity_light
+              name: Vanity
+              icon: mdi:lightbulb-on
+              color: yellow
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.vanity_light
+                state_not: "on"
+            card:
+              type: button
+              entity: light.vanity_light
+              name: Vanity
+              icon: mdi:lightbulb-off
+              color: disabled
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.hallway_overhead_light
+                state: "on"
+            card:
+              type: button
+              entity: light.hallway_overhead_light
+              name: Hallway
+              icon: mdi:lightbulb-on
+              color: yellow
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.hallway_overhead_light
+                state_not: "on"
+            card:
+              type: button
+              entity: light.hallway_overhead_light
+              name: Hallway
+              icon: mdi:lightbulb-off
+              color: disabled
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.bedroom_overhead_light
+                state: "on"
+            card:
+              type: button
+              entity: light.bedroom_overhead_light
+              name: Bedroom
+              icon: mdi:lightbulb-on
+              color: yellow
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.bedroom_overhead_light
+                state_not: "on"
+            card:
+              type: button
+              entity: light.bedroom_overhead_light
+              name: Bedroom
+              icon: mdi:lightbulb-off
+              color: disabled
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.basement_precision_plex_awning_light
+                state: "on"
+            card:
+              type: button
+              entity: light.basement_precision_plex_awning_light
+              name: Awning
+              icon: mdi:string-lights
+              color: yellow
+              show_state: true
+              tap_action:
+                action: toggle
+          - type: conditional
+            conditions:
+              - entity: light.basement_precision_plex_awning_light
+                state_not: "on"
+            card:
+              type: button
+              entity: light.basement_precision_plex_awning_light
+              name: Awning
+              icon: mdi:string-lights-off
+              color: disabled
+              show_state: true
+              tap_action:
+                action: toggle
+  - title: Slides
+    path: slides
+    icon: mdi:arrow-expand-horizontal
+    cards:
+      - square: false
+        type: grid
+        columns: 2
+        cards:
+          - type: button
+            entity: cover.basement_precision_plex_patio_awning
+            name: Patio Awning
+            icon: mdi:awning
+            show_state: true
+            color: orange
+            tap_action:
+              action: more-info
+            hold_action:
+              action: toggle
+          - type: button
+            entity: cover.basement_precision_plex_bedroom_slide
+            name: Bedroom Slide
+            icon: mdi:bed
+            show_state: true
+            color: orange
+            tap_action:
+              action: more-info
+            hold_action:
+              action: toggle
+          - type: button
+            entity: cover.basement_precision_plex_wardrobe_slide
+            name: Wardrobe
+            icon: mdi:wardrobe
+            show_state: true
+            color: orange
+            tap_action:
+              action: more-info
+            hold_action:
+              action: toggle
+          - type: button
+            entity: cover.basement_precision_plex_sofa_slide
+            name: Sofa Slide
+            icon: mdi:sofa
+            show_state: true
+            color: orange
+            tap_action:
+              action: more-info
+            hold_action:
+              action: toggle
+  - title: Generator
+    path: generator
+    icon: mdi:engine
+    cards:
+      - square: false
+        type: grid
+        columns: 2
+        cards:
+          - type: conditional
+            conditions:
+              - entity: binary_sensor.basement_precision_plex_generator_running
+                state: "on"
+            card:
+              type: button
+              entity: binary_sensor.basement_precision_plex_generator_running
+              name: Running
+              icon: mdi:engine
+              color: green
+              show_state: true
+              tap_action:
+                action: more-info
+          - type: conditional
+            conditions:
+              - entity: binary_sensor.basement_precision_plex_generator_running
+                state_not: "on"
+            card:
+              type: button
+              entity: binary_sensor.basement_precision_plex_generator_running
+              name: Generator
+              icon: mdi:engine-off
+              color: disabled
+              show_state: true
+              tap_action:
+                action: more-info
+          - type: button
+            entity: sensor.basement_precision_plex_generator_status
+            name: Status
+            icon: mdi:information
+            show_state: true
+            tap_action:
+              action: more-info
+          - type: button
+            entity: sensor.basement_precision_plex_generator_runtime
+            name: Runtime
+            icon: mdi:timer-outline
+            show_state: true
+            tap_action:
+              action: more-info
+          - type: button
+            entity: button.basement_precision_plex_generator_autostart
+            name: AutoStart
+            icon: mdi:play-speed
+            color: green
+            show_state: false
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.basement_precision_plex_generator_autostart
+          - type: button
+            entity: button.basement_precision_plex_generator_autostop
+            name: AutoStop
+            icon: mdi:stop-circle-outline
+            color: orange
+            show_state: false
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.basement_precision_plex_generator_autostop
+  - title: Resources
+    path: resources
+    icon: mdi:gauge
+    cards:
+      - square: false
+        type: grid
+        columns: 2
+        cards:
+          - type: gauge
+            entity: sensor.basement_precision_plex_fresh_water
+            name: Fresh
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 0
+              yellow: 33
+              red: 67
+          - type: gauge
+            entity: sensor.basement_precision_plex_grey_tank
+            name: Grey
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 0
+              yellow: 33
+              red: 67
+          - type: gauge
+            entity: sensor.basement_precision_plex_black_tank
+            name: Black
+            min: 0
+            max: 100
+            severity:
+              green: 0
+              yellow: 33
+              red: 67
+            needle: true
+          - type: gauge
+            entity: sensor.basement_precision_plex_propane
+            name: Propane
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 50
+              yellow: 25
+              red: 0
+      - square: false
+        type: grid
+        columns: 2
+        cards:
+          - type: button
+            entity: sensor.coach_battery_voltmeter
+            name: Coach
+            icon: mdi:car-battery
+            show_state: true
+            color: green
+            tap_action:
+              action: more-info
+          - type: button
+            entity: sensor.basement_precision_plex_coach_battery
+            name: House
+            icon: mdi:battery
+            show_state: true
+            color: green
+            tap_action:
+              action: more-info
+  - title: Env
+    path: environment
+    icon: mdi:thermometer-water
+    cards:
+      - type: custom:mini-graph-card
+        name: Living Room
+        entities:
+          - entity: sensor.living_room_htg3_temperature
+            name: Temp
+          - entity: sensor.living_room_htg3_humidity
+            name: Humidity
+      - type: entities
+        title: Temperatures
+        state_color: false
+        entities:
+          - entity: sensor.system_monitor_processor_temperature
+            name: Raspberry Pi
+  - title: Service
+    path: service
+    icon: mdi:wrench-cog
+    cards:
+      - type: markdown
+        content: >
+          ## Service Controls
+
+          These controls affect slide and awning calibration. Record existing
+          values before making changes.
+      - type: entities
+        title: Patio Awning
+        show_header_toggle: false
+        entities:
+          - entity: button.basement_precision_plex_patio_awning_jog_extend
+            name: Jog Extend
+          - entity: button.basement_precision_plex_patio_awning_jog_retract
+            name: Jog Retract
+          - entity: number.basement_precision_plex_awning_open_seconds
+            name: Open Seconds
+          - entity: number.basement_precision_plex_awning_close_seconds
+            name: Close Seconds
+          - entity: number.basement_precision_plex_awning_jog_seconds
+            name: Jog Seconds
+          - type: divider
+          - entity: button.basement_precision_plex_patio_awning_reset_fully_extended
+            name: Reset Fully Extended
+          - entity: button.basement_precision_plex_patio_awning_reset_fully_retracted
+            name: Reset Fully Retracted
+      - type: entities
+        title: Bedroom Slide
+        show_header_toggle: false
+        entities:
+          - entity: button.basement_precision_plex_bedroom_slide_jog_extend
+            name: Jog Extend
+          - entity: button.basement_precision_plex_bedroom_slide_jog_retract
+            name: Jog Retract
+          - entity: number.basement_precision_plex_bed_slide_open_seconds
+            name: Open Seconds
+          - entity: number.basement_precision_plex_bed_slide_close_seconds
+            name: Close Seconds
+          - entity: number.basement_precision_plex_bed_slide_jog_seconds
+            name: Jog Seconds
+          - type: divider
+          - entity: button.basement_precision_plex_bedroom_slide_reset_fully_extended
+            name: Reset Fully Extended
+          - entity: button.basement_precision_plex_bedroom_slide_reset_fully_retracted
+            name: Reset Fully Retracted
+      - type: entities
+        title: Wardrobe Slide
+        show_header_toggle: false
+        entities:
+          - entity: button.basement_precision_plex_wardrobe_slide_jog_extend
+            name: Jog Extend
+          - entity: button.basement_precision_plex_wardrobe_slide_jog_retract
+            name: Jog Retract
+          - entity: number.basement_precision_plex_wardrobe_slide_open_seconds
+            name: Open Seconds
+          - entity: number.basement_precision_plex_wardrobe_slide_close_seconds
+            name: Close Seconds
+          - entity: number.basement_precision_plex_wardrobe_slide_jog_seconds
+            name: Jog Seconds
+          - type: divider
+          - entity: button.basement_precision_plex_wardrobe_slide_reset_fully_extended
+            name: Reset Fully Extended
+          - entity: >-
+              button.basement_precision_plex_wardrobe_slide_reset_fully_retracted
+            name: Reset Fully Retracted
+      - type: entities
+        title: Sofa Slide
+        show_header_toggle: false
+        entities:
+          - entity: button.basement_precision_plex_sofa_slide_jog_extend
+            name: Jog Extend
+          - entity: button.basement_precision_plex_sofa_slide_jog_retract
+            name: Jog Retract
+          - entity: number.basement_precision_plex_sofa_slide_open_seconds
+            name: Open Seconds
+          - entity: number.basement_precision_plex_sofa_slide_close_seconds
+            name: Close Seconds
+          - entity: number.basement_precision_plex_sofa_slide_jog_seconds
+            name: Jog Seconds
+          - type: divider
+          - entity: button.basement_precision_plex_sofa_slide_reset_fully_extended
+            name: Reset Fully Extended
+          - entity: button.basement_precision_plex_sofa_slide_reset_fully_retracted
+            name: Reset Fully Retracted
+      - type: entities
+        title: Generator Service
+        show_header_toggle: false
+        entities:
+          - entity: binary_sensor.basement_precision_plex_generator_running
+            name: Running
+          - entity: sensor.basement_precision_plex_generator_status
+            name: Status
+          - entity: sensor.basement_precision_plex_generator_runtime
+            name: Runtime
+          - type: divider
+          - entity: button.basement_precision_plex_generator_start
+            name: Start
+          - entity: button.basement_precision_plex_generator_stop
+            name: Stop
+          - entity: button.basement_precision_plex_generator_autostart
+            name: AutoStart
+          - entity: button.basement_precision_plex_generator_autostop
+            name: AutoStop

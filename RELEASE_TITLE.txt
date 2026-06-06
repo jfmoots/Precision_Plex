@@ -1,1 +1,1 @@
-v4.5.3 – Logging Level Cleanup
+Precision Plex v5.0.0 – Full RV Integration & Mobile Dashboard Release

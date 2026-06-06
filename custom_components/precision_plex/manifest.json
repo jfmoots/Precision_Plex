@@ -1,7 +1,7 @@
 {
   "domain": "precision_plex",
   "name": "Precision Plex",
-  "version": "4.5.3",
+  "version": "5.0.0",
   "documentation": "https://github.com/jfmoots/Precision_Plex",
   "issue_tracker": "https://github.com/jfmoots/Precision_Plex/issues",
   "codeowners": [
