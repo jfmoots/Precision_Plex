@@ -4,14 +4,14 @@ A custom Home Assistant integration for Precision Circuits Precision Plex system
 
 ## Current Recommended Release
 
-**v4.5.1** is the current GitHub-ready stable baseline release.
+**v4.5.2** is the current GitHub-ready stable baseline release.
 
 This release focuses on telemetry validation and long-term stability. It keeps the complete feature set from the prior Precision Plex integration releases while adding production-grade validation for noisy or malformed BLE telemetry. The integration now rejects invalid propane samples, protects generator runtime from corrupted candidates, collapses generator flag variants into clean user-facing states, and removes the temporary overnight diagnostic log chatter used during protocol analysis.
 
 
-### v4.5.1 Follow-Up
+### v4.5.2 Log Cleanup Follow-Up
 
-v4.5.1 adds stricter 02AA frame-shape validation and LP change confirmation on top of the v4.5.0 telemetry stability work. This prevents brief clean-looking but incorrect propane samples from creating one-sample 0% or 25% blips while keeping logs quiet for normal production use.
+v4.5.2 keeps the v4.5.0/v4.5.1 telemetry validation foundation and removes remaining reverse-engineering diagnostic startup chatter. The generator runtime recovery logic remains in place, but its candidate-selection diagnostic message has been removed from normal logging. The 02AA and 02BB subscription confirmations are retained as normal informational startup events.
 
 ## Tested Coach and Scope
 
