@@ -10,7 +10,7 @@ from typing import Any
 
 from homeassistant.components.cover import CoverDeviceClass, CoverEntity, CoverEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -41,6 +41,31 @@ from .coordinator import PrecisionPlexStateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 HOLD_INTERVAL_SECONDS = 0.30
+
+SOFA_SLIDE_DEFAULT_FULL_TRAVEL_PULSES = 5450.0
+SOFA_SLIDE_ENDPOINT_SNAP_PERCENT = 2.0
+SOFA_SLIDE_TELEMETRY_FRIENDLY_NAMES = {
+    "travel_pulses": "Sofa Slide Travel Pulses",
+    "sync_error": "Sofa Slide Sync Error",
+    "moving": "Sofa Slide Moving",
+}
+SOFA_SLIDE_TELEMETRY_ENTITY_CANDIDATES = {
+    "travel_pulses": (
+        "sensor.sofa_slide_travel_pulses",
+        "sensor.lippert_sofa_slide_controller_sofa_slide_travel_pulses",
+        "sensor.lippert_sofa_slide_telemetry_sofa_slide_travel_pulses",
+    ),
+    "sync_error": (
+        "sensor.sofa_slide_sync_error",
+        "sensor.lippert_sofa_slide_controller_sofa_slide_sync_error",
+        "sensor.lippert_sofa_slide_telemetry_sofa_slide_sync_error",
+    ),
+    "moving": (
+        "binary_sensor.sofa_slide_moving",
+        "binary_sensor.lippert_sofa_slide_controller_sofa_slide_moving",
+        "binary_sensor.lippert_sofa_slide_telemetry_sofa_slide_moving",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -181,6 +206,16 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._active_direction: str | None = None
 
         self._estimated_position = 0.0
+        self._position_source = "time"
+        self._last_pulse_total: float | None = None
+        self._last_pulse_delta: float | None = None
+        self._last_pulse_sync_error: float | None = None
+        self._pulse_telemetry_available = False
+        # When the controller state bit drops, the ESPHome sensor update can lag
+        # by a second or two. Keep applying pulse deltas briefly after motion
+        # stops so the final encoder pulses are not missed.
+        self._pulse_settle_direction: str | None = None
+        self._pulse_settle_until: float | None = None
         self._motion_direction: str | None = None
         self._motion_started_at: float | None = None
         self._last_position_update_at: float | None = None
@@ -287,7 +322,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return diagnostic attributes."""
         self._update_estimated_position()
-        return {
+        attrs = {
             "state_word": (
                 f"0x{self.coordinator.state_word:04X}"
                 if self.coordinator.state_word is not None
@@ -303,6 +338,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             "active_ha_direction": self._active_direction,
             "tracked_motion_direction": self._motion_direction,
             "estimated_position": round(self._estimated_position, 1),
+            "position_source": self._position_source,
             "open_full_seconds": self._out_full_seconds(),
             "close_full_seconds": self._in_full_seconds(),
             "hold_interval_seconds": HOLD_INTERVAL_SECONDS,
@@ -313,6 +349,23 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             "legacy_jog_buttons_available": True,
             "legacy_calibration_buttons_available": True,
         }
+        if self._plex_description.key == "sofa_slide":
+            pulse_travel_total = self._read_pulse_travel_total()
+            pulse_sync_error = self._read_pulse_sync_error()
+            attrs.update(
+                {
+                    "pulse_telemetry_available": pulse_travel_total is not None,
+                    "pulse_travel_total": pulse_travel_total,
+                    "pulse_last_delta": (
+                        round(self._last_pulse_delta, 1)
+                        if self._last_pulse_delta is not None
+                        else None
+                    ),
+                    "pulse_full_travel": self._pulse_full_travel(),
+                    "pulse_sync_error": pulse_sync_error,
+                }
+            )
+        return attrs
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Extend/open until stopped or safety limit expires."""
@@ -405,7 +458,12 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             self._motion_started_at = None
             self._last_position_update_at = None
             self._active_direction = None
+            self._pulse_settle_direction = None
+            self._pulse_settle_until = None
             self._estimated_position = max(0.0, min(100.0, float(position)))
+            self._last_pulse_total = self._read_pulse_travel_total()
+            self._last_pulse_delta = None
+            self._position_source = "pulse" if self._last_pulse_total is not None else "time"
             self.async_write_ha_state()
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
@@ -601,6 +659,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._update_estimated_position()
 
         if controller_direction is None:
+            if self._motion_direction is not None and self._plex_description.key == "sofa_slide":
+                self._pulse_settle_direction = self._motion_direction
+                self._pulse_settle_until = time.monotonic() + 2.5
             self._motion_direction = None
             self._motion_started_at = None
             self._last_position_update_at = None
@@ -613,21 +674,51 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         """Begin position tracking for a movement direction."""
         now = time.monotonic()
         self._motion_direction = direction
+        self._pulse_settle_direction = None
+        self._pulse_settle_until = None
         self._motion_started_at = now
         self._last_position_update_at = now
+        self._last_pulse_total = self._read_pulse_travel_total()
+        self._last_pulse_delta = None
 
     def _update_estimated_position(self) -> None:
-        """Update estimated position using elapsed motion time."""
-        if self._motion_direction is None or self._last_position_update_at is None:
+        """Update estimated position using pulse telemetry when available.
+
+        The original time-based estimator remains the fallback. For the Sofa
+        Slide, an optional ESPHome telemetry node can publish cumulative
+        Schwintek/SlimRack motor pulse counts. When that telemetry is present,
+        the Precision Plex direction tracker supplies direction and pulse deltas
+        supply distance moved.
+        """
+        now = time.monotonic()
+
+        if self._motion_direction is None:
+            if (
+                self._pulse_settle_direction is not None
+                and self._pulse_settle_until is not None
+                and now <= self._pulse_settle_until
+            ):
+                if self._update_position_from_pulses(self._pulse_settle_direction):
+                    self._clamp_position()
+                return
+            self._pulse_settle_direction = None
+            self._pulse_settle_until = None
             return
 
-        now = time.monotonic()
+        if self._last_position_update_at is None:
+            return
+
         elapsed = max(0.0, now - self._last_position_update_at)
         self._last_position_update_at = now
 
         if elapsed <= 0:
             return
 
+        if self._update_position_from_pulses(self._motion_direction):
+            self._clamp_position()
+            return
+
+        self._position_source = "time"
         if self._motion_direction == "out":
             self._estimated_position += (
                 elapsed / self._out_full_seconds()
@@ -638,6 +729,114 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             ) * 100.0
 
         self._clamp_position()
+
+    def _update_position_from_pulses(self, direction: str | None = None) -> bool:
+        """Update position from optional Sofa Slide ESPHome pulse telemetry."""
+        if self._plex_description.key != "sofa_slide":
+            self._pulse_telemetry_available = False
+            return False
+
+        current_total = self._read_pulse_travel_total()
+        if current_total is None:
+            self._pulse_telemetry_available = False
+            return False
+
+        self._pulse_telemetry_available = True
+        self._last_pulse_sync_error = self._read_pulse_sync_error()
+
+        if self._last_pulse_total is None:
+            self._last_pulse_total = current_total
+            self._position_source = "pulse"
+            return True
+
+        delta = current_total - self._last_pulse_total
+
+        # ESPHome pulse counters reset to zero on ESP reboot/reflash. Re-baseline
+        # and skip this update rather than applying a large negative jump.
+        if delta < 0:
+            _LOGGER.debug(
+                "Precision Plex %s pulse counter reset detected: previous=%.1f current=%.1f",
+                self._plex_description.key,
+                self._last_pulse_total,
+                current_total,
+            )
+            self._last_pulse_total = current_total
+            self._last_pulse_delta = None
+            self._position_source = "pulse"
+            return True
+
+        self._last_pulse_total = current_total
+        self._last_pulse_delta = delta
+
+        if delta <= 0:
+            self._position_source = "pulse"
+            return True
+
+        percent_delta = (delta / self._pulse_full_travel()) * 100.0
+        movement_direction = direction or self._motion_direction
+        if movement_direction == "out":
+            self._estimated_position += percent_delta
+        elif movement_direction == "in":
+            self._estimated_position -= percent_delta
+        else:
+            return False
+
+        self._position_source = "pulse"
+        return True
+
+    def _read_pulse_travel_total(self) -> float | None:
+        """Return cumulative Sofa Slide travel pulses from ESPHome, if present."""
+        if self._plex_description.key != "sofa_slide":
+            return None
+        return self._read_float_state("travel_pulses")
+
+    def _read_pulse_sync_error(self) -> float | None:
+        """Return Sofa Slide motor sync error from ESPHome, if present."""
+        if self._plex_description.key != "sofa_slide":
+            return None
+        return self._read_float_state("sync_error")
+
+    def _read_float_state(self, telemetry_key: str) -> float | None:
+        """Read a numeric Home Assistant state by candidate entity IDs or friendly name."""
+        state = self._find_telemetry_state(telemetry_key)
+        if state is None:
+            return None
+        try:
+            return float(state.state)
+        except (TypeError, ValueError):
+            return None
+
+    def _find_telemetry_state(self, telemetry_key: str) -> State | None:
+        """Find an optional ESPHome telemetry entity for this cover."""
+        if self.hass is None:
+            return None
+
+        for entity_id in SOFA_SLIDE_TELEMETRY_ENTITY_CANDIDATES.get(telemetry_key, ()):
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state not in ("unknown", "unavailable"):
+                return state
+
+        friendly_name = SOFA_SLIDE_TELEMETRY_FRIENDLY_NAMES.get(telemetry_key)
+        if friendly_name is None:
+            return None
+
+        for state in self.hass.states.async_all():
+            if (
+                state.attributes.get("friendly_name") == friendly_name
+                and state.state not in ("unknown", "unavailable")
+            ):
+                return state
+
+        return None
+
+    def _pulse_full_travel(self) -> float:
+        """Return configured full-travel pulse count for the Sofa Slide."""
+        return float(
+            getattr(self.coordinator, "runtime_settings", {}).get(
+                "sofa_slide_full_travel_pulses",
+                SOFA_SLIDE_DEFAULT_FULL_TRAVEL_PULSES,
+            )
+        )
 
 
     def _out_full_seconds(self) -> float:
@@ -686,8 +885,21 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         )
 
     def _clamp_position(self) -> None:
-        """Clamp estimated position."""
+        """Clamp estimated position and snap pulse telemetry near endpoints."""
         self._estimated_position = max(0.0, min(100.0, self._estimated_position))
+
+        # Pulse telemetry is precise, but real RV slides often settle a fraction
+        # of a percent short of the learned end stop. Snap the Sofa Slide to the
+        # visible endpoints so Home Assistant shows fully closed/open when the
+        # pulse-derived position lands within the calibrated tolerance.
+        if (
+            self._plex_description.key == "sofa_slide"
+            and self._position_source == "pulse"
+        ):
+            if self._estimated_position <= SOFA_SLIDE_ENDPOINT_SNAP_PERCENT:
+                self._estimated_position = 0.0
+            elif self._estimated_position >= (100.0 - SOFA_SLIDE_ENDPOINT_SNAP_PERCENT):
+                self._estimated_position = 100.0
 
 
 

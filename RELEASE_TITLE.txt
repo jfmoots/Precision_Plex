@@ -1,1 +1,1 @@
-Precision Plex v5.0.0 – Full RV Integration & Mobile Dashboard Release
+v5.1.2 - Sofa Slide Pulse Telemetry Endpoint Snapping

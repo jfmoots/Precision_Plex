@@ -1,14 +1,27 @@
 # Precision Plex Home Assistant Integration
 
+## v5.1.2 - Sofa Slide Pulse Telemetry Endpoint Snapping
+
+This maintenance release refines the optional Sofa Slide ESPHome pulse telemetry support by snapping pulse-derived endpoint positions near the calibrated limits. When pulse telemetry places the Sofa Slide within 2% of fully retracted or fully extended, the cover now reports the clean endpoint value of 0% or 100%.
+
+This keeps the Home Assistant UI aligned with the physical slide stops while preserving pulse-based travel tracking, sync error diagnostics, and time-based fallback behavior when telemetry is unavailable.
+
+
 A custom Home Assistant integration for Precision Circuits Precision Plex systems.
 
 ## Current Recommended Release
 
-**v5.0.0** is the current GitHub-ready major release.
+**v5.1.1** is the current GitHub-ready release.
 
-v5.0.0 is the first complete Precision Plex Home Assistant ecosystem release. It keeps the validated v4.5.3 telemetry-stability foundation and adds a full mobile dashboard example, dashboard screenshots, dashboard data-source documentation, and a polished project presentation suitable for GitHub users who want to see what a finished RV control dashboard can look like.
+This release refines optional Sofa Slide ESPHome pulse telemetry support by reconciling final pulse updates after motion stops and preserving the existing time-based position fallback for installs without the telemetry hardware.
 
-The integration remains focused on Precision Plex BLE control and telemetry. The included dashboard demonstrates a broader real-world RV Home Assistant installation that also uses Shelly devices and standard Home Assistant integrations alongside Precision Plex.
+## Optional Sofa Slide Pulse Telemetry
+
+v5.1.0 adds optional support for an ESPHome-based Lippert Sofa Slide telemetry node. The tested prototype reads the Schwintek/SlimRack motor feedback pulse wires through high-impedance resistor dividers and exposes cumulative travel pulses and motor sync error to Home Assistant.
+
+When the expected ESPHome entities are available, the Precision Plex Sofa Slide cover uses the existing Precision Plex direction tracking (`in` / `out`) together with pulse deltas to update position. If the telemetry entities are missing, unavailable, or reset, the cover safely falls back to the original time-based position estimator.
+
+The existing reset/calibration buttons continue to work and now also re-baseline pulse tracking when pulse telemetry is present.
 
 ## Tested Coach and Scope
 
