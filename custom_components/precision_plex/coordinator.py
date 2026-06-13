@@ -290,11 +290,11 @@ class PrecisionPlexStateCoordinator:
             raise BleakError("Precision Plex coordinator stopped during connect")
 
         await asyncio.sleep(0.25)
-        await self._async_prime_session(self._client)
 
-        await self._async_read_state(self._client)
-        await self._async_read_battery_state(self._client)
-
+        # Precision Plex continuously publishes state through 02BB and 02AA notifications.
+        # On fresh HAOS/BlueZ installs, the old startup prime/read sequence could trigger
+        # GATT "Unlikely Error" or timeout failures before notifications were subscribed.
+        # Subscribe first and let the live notification stream populate coordinator state.
         await self._async_start_state_notify(self._client)
         await self._async_start_battery_notify(self._client)
 

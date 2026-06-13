@@ -1,19 +1,21 @@
 # Precision Plex Home Assistant Integration
 
-## v5.1.2 - Sofa Slide Pulse Telemetry Endpoint Snapping
+## v5.1.3 - Notification-First BLE Startup Recovery
 
-This maintenance release refines the optional Sofa Slide ESPHome pulse telemetry support by snapping pulse-derived endpoint positions near the calibrated limits. When pulse telemetry places the Sofa Slide within 2% of fully retracted or fully extended, the cover now reports the clean endpoint value of 0% or 100%.
+This maintenance release makes Precision Plex startup more robust after a Home Assistant OS reinstall, restore, Bluetooth re-pair, or BlueZ/Bleak cache reset.
 
-This keeps the Home Assistant UI aligned with the physical slide stops while preserving pulse-based travel tracking, sync error diagnostics, and time-based fallback behavior when telemetry is unavailable.
+The coordinator now skips the old startup prime/read sequence and subscribes directly to the live 02BB and 02AA notification streams. Precision Plex publishes state continuously through those notifications, so telemetry now comes online without the startup GATT `Unlikely Error` or timeout loop seen on fresh Bluetooth stacks.
+
+This preserves the existing sensors, covers, switches, buttons, generator telemetry, tank telemetry, propane telemetry, and optional Sofa Slide ESPHome pulse telemetry behavior.
 
 
 A custom Home Assistant integration for Precision Circuits Precision Plex systems.
 
 ## Current Recommended Release
 
-**v5.1.1** is the current GitHub-ready release.
+**v5.1.3** is the current GitHub-ready release.
 
-This release refines optional Sofa Slide ESPHome pulse telemetry support by reconciling final pulse updates after motion stops and preserving the existing time-based position fallback for installs without the telemetry hardware.
+This release makes BLE startup notification-first so restored or freshly re-paired Home Assistant OS installs can connect, subscribe, and populate Precision Plex telemetry without relying on startup GATT reads.
 
 ## Optional Sofa Slide Pulse Telemetry
 

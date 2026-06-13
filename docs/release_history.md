@@ -1,5 +1,13 @@
 ## v4.2.0 — Native Cover Entities
 
+## v5.1.3 - Notification-First BLE Startup Recovery
+
+- Changed BLE startup to subscribe directly to 02BB and 02AA notifications.
+- Removed startup dependency on the old session-prime write and initial GATT reads.
+- Fixes GATT `Unlikely Error` / `TimeoutError` loops seen after fresh HAOS restore and BLE re-pair.
+- Preserves all existing decoded telemetry and controls.
+
+
 - Promoted the awning and slide controls as the primary native Home Assistant cover interface.
 - Kept existing cover unique IDs and legacy jog/calibration controls for compatibility.
 - Added the awning device class to improve UI/HomeKit presentation.
