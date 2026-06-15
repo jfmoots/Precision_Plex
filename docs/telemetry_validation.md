@@ -16,6 +16,34 @@ The 02AA notification stream carries the major read-only telemetry values:
 
 The integration performs frame-shape checks before decoding 02AA telemetry. Frames that appear shifted or malformed are rejected before any entity state is updated.
 
+## 02BB State Frame
+
+The 02BB notification stream carries state words used by the app-visible switches, covers, lights, and movement flags. Cover entities expose raw 02BB bytes and state words as diagnostic attributes.
+
+## Quadrature Slide Telemetry
+
+v5.2.0 adds optional ESPHome quadrature slide telemetry for Bedroom, Sofa, and Wardrobe slides.
+
+The integration validates telemetry availability before using it as the cover position source. If quadrature entities are missing or unavailable, the cover falls back to the existing timing model.
+
+Quadrature diagnostics include:
+
+- `quadrature_available`
+- `quadrature_travel_total`
+- `quadrature_full_travel`
+- `quadrature_sync_error`
+- `quadrature_last_delta`
+
+Tested full-travel values:
+
+| Slide | Full Travel Count | Observed Sync Error at Full Extension |
+| --- | ---: | ---: |
+| Bedroom | 21,727 | ~36-39 counts |
+| Sofa | 21,503 | ~24 counts |
+| Wardrobe | 13,873 | ~64-67 counts |
+
+The sync error value is a diagnostic difference between the two decoded motor positions. It is not currently used to block movement.
+
 ## Propane Validation
 
 Controlled monitor traces confirmed the clean propane display encodings:
@@ -30,7 +58,7 @@ Controlled monitor traces confirmed the clean propane display encodings:
 
 Long-duration diagnostics also observed transient LP bytes such as `0x05`, `0x0A`, `0x14`, and `0x28`. These do not match the clean display encoding and can cause false propane readings if published directly.
 
-The integration now rejects non-clean LP samples and retains the last known good propane value.
+The integration rejects non-clean LP samples and retains the last known good propane value.
 
 ## Tank Validation
 
@@ -61,16 +89,3 @@ Other mapped generator states include AutoStart Accepted, Stop Accepted, AutoSta
 ## Generator Runtime
 
 Generator runtime is protected by sanity checks. Runtime candidates are rejected if they move backwards, jump implausibly, or come from malformed telemetry. The last known good runtime is retained when an invalid candidate is rejected.
-
-## v4.5.1 Follow-Up: 02AA Frame Shape and LP Confirmation
-
-Additional review after v4.5.0 showed that malformed or misleading 02AA samples can sometimes look valid at an individual field level. v4.5.1 adds stricter frame-shape validation before decoding telemetry.
-
-For the tested coach, accepted 02AA telemetry frames are expected to be 20 bytes long and preserve the known tank framing nibbles around the fresh, grey, and black tank fields. Frames that do not match this shape are discarded before entity states are updated.
-
-LP telemetry also now requires confirmation before publishing a changed clean value after startup. The first valid LP value initializes immediately. After that, a different LP percentage must appear in consecutive accepted frames before it replaces the last known good value. This prevents brief one-sample propane blips while still allowing real LP changes to propagate quickly.
-
-
-## v4.5.2 Follow-Up: Production Logging Cleanup
-
-v4.5.2 removes the remaining generator runtime source diagnostic message from normal logging while keeping the runtime recovery and sanity logic in place. 02AA and 02BB subscription confirmations are retained as informational startup events.

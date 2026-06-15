@@ -1,3 +1,16 @@
+# Release History
+
+## v5.2.0 - Quadrature Slide Telemetry
+
+- Added Bedroom Slide quadrature telemetry support.
+- Converted Sofa and Wardrobe slide telemetry from experimental pulse-counter position estimates to ESPHome `rotary_encoder` quadrature travel counts.
+- Added default full-travel quadrature counts for Bedroom, Sofa, and Wardrobe slides.
+- Added `quadrature_*` diagnostic cover attributes.
+- Fixed startup source selection so valid quadrature telemetry is used immediately after Home Assistant restart.
+- Fixed retract-direction position updates by treating quadrature travel as absolute position rather than a cumulative pulse counter.
+- Preserved timing-based position fallback for all slides when telemetry is unavailable.
+- Preserved automatic ESPHome entity discovery for differing Home Assistant entity names.
+
 ## v4.2.0 — Native Cover Entities
 
 ## v5.1.3 - Notification-First BLE Startup Recovery
@@ -165,3 +178,9 @@
 
 - Added clean native cover entities alongside the original preserved cover entities.
 - Intended for cleaner Home Assistant and HomeKit naming without breaking existing dashboards or automations.
+
+## v5.1.5 – Wardrobe Slide Pulse Telemetry Support
+
+- Added optional Wardrobe Slide ESPHome pulse telemetry support.
+- Added Wardrobe Slide pulse travel/sync diagnostics and endpoint snapping.
+- Preserved time-based fallback when telemetry is unavailable.

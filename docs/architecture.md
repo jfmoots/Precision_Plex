@@ -54,3 +54,9 @@ This is an intentional tradeoff. The project goal is now to replace the Wireless
 - Support safe physical motion control
 - Keep travel-time calibration user-editable
 - Document the reverse-engineered protocol for future coaches
+
+## v5.2.0 Slide Position Architecture
+
+Slide covers now use a two-layer position model. When ESPHome quadrature telemetry is available, the cover calculates position from decoded Lippert motor Hall sensor travel counts. When telemetry is not available, the cover falls back to the existing time-based estimator.
+
+This keeps the integration compatible with installations that do not have ESPHome telemetry nodes while allowing the tested Georgetown GT5 slide rooms to report actual encoder-derived position.

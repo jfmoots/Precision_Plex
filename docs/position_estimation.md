@@ -1,50 +1,88 @@
-# Position Estimation
+# Slide Position and Quadrature Telemetry
 
 ## Overview
 
-The awning and bed slide do not currently expose absolute position sensors through the decoded Precision Plex state.
+v5.2.0 uses two position models for Precision Plex slide covers:
 
-Position is estimated using movement time.
+1. **Quadrature telemetry** when ESPHome Lippert slide telemetry nodes are available.
+2. **Timing estimation** as the fallback when telemetry is unavailable.
+
+The patio awning continues to use the timing model.
 
 ## Position Convention
 
 - `0%` = fully retracted / closed
 - `100%` = fully extended / open
 
-## Configurable Travel Times
+## Quadrature Telemetry
+
+Lippert 697096 slide controllers use Hall-effect motor feedback. The thin sensor wires in each 6-pin motor harness are separate from the heavy motor power wires.
+
+| Wire | Function |
+| --- | --- |
+| Thin Red | 5V Hall sensor power |
+| Thin Black | Hall sensor ground |
+| Thin Green | Quadrature Channel A |
+| Thin Yellow | Quadrature Channel B |
+
+ESPHome `rotary_encoder` sensors decode each motor's Green/Yellow pair. The integration reads:
+
+- Quadrature Travel
+- Quadrature Sync Error
+
+The cover position is calculated from:
+
+```text
+position = quadrature_travel_total / quadrature_full_travel * 100
+```
+
+The value is clamped to the Home Assistant cover range of 0-100%.
+
+## Tested Full-Travel Counts
+
+| Slide | Full Travel Count |
+| --- | ---: |
+| Bedroom Slide | 21,727 |
+| Sofa Slide | 21,503 |
+| Wardrobe Slide | 13,873 |
+
+## Startup Behavior
+
+When valid quadrature telemetry is present after a Home Assistant restart, the cover immediately uses `position_source: quadrature` and restores position from the ESPHome travel count. It does not wait for the first movement after restart.
+
+## Timing Fallback
+
+If quadrature telemetry is missing, unavailable, stale, or not installed, the cover uses the original timing model.
 
 Travel-time settings are exposed as Home Assistant Number entities:
 
-| Entity | Default |
-|---|---:|
-| `number.awning_open_seconds` | 18 seconds |
-| `number.awning_close_seconds` | 25 seconds |
-| `number.bed_slide_open_seconds` | 28 seconds |
-| `number.bed_slide_close_seconds` | 23 seconds |
+| Entity Purpose | Default |
+| --- | ---: |
+| Awning Open Seconds | 18 |
+| Awning Close Seconds | 25 |
+| Bed Slide Open Seconds | 28 |
+| Bed Slide Close Seconds | 24 |
+| Wardrobe Slide Open Seconds | 18 |
+| Wardrobe Slide Close Seconds | 17 |
+| Sofa Slide Open Seconds | 32 |
+| Sofa Slide Close Seconds | 28 |
 
-These values control:
+## Diagnostics
 
-- Maximum safety runtime
-- Position estimation speed
-- Slider/set-position timing
+Active quadrature telemetry appears in cover attributes:
 
-## Wall-Panel Tracking
+```yaml
+position_source: quadrature
+quadrature_available: true
+quadrature_travel_total: 13875.5
+quadrature_full_travel: 13873
+quadrature_sync_error: 67
+quadrature_last_delta: 0
+```
 
-Because the integration keeps a persistent BLE connection, it can observe movement initiated from the RV wall panel.
+Timing fallback appears as:
 
-When a movement bit turns on, position tracking begins. When the bit clears, the estimated position freezes.
-
-## Limitations
-
-Position is estimated, not physically measured.
-
-Accuracy can drift due to:
-
-- Motor wear
-- Battery voltage
-- Mechanical friction
-- Slide or awning loading
-- Weather or temperature
-- Partial manual movement while Home Assistant is offline
-
-Use the configurable travel-time values to recalibrate.
+```yaml
+position_source: time
+quadrature_available: false
+```

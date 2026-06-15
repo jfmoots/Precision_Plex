@@ -1,4 +1,4 @@
-"""Config flow for Precision Plex read-only monitor.
+"""Config flow and options flow for Precision Plex.
 
 Precision Plex BLE bonding config flow based on v2.6.33, promoted for v3.0.0.
 
@@ -25,6 +25,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components import bluetooth
 from homeassistant.const import CONF_ADDRESS
+from homeassistant.core import callback
 
 from .const import (
     DEFAULT_TARGET_ADDRESS,
@@ -37,6 +38,8 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 CONF_PAIRING_MODE_CONFIRMED = "pairing_mode_confirmed"
+CONF_REPAIR_START = "start_repair"
+CONF_REPAIR_CONFIRM = "repair_confirm"
 
 CONNECT_TIMEOUT = 45.0
 GATT_TIMEOUT = 10.0
@@ -49,6 +52,12 @@ class PrecisionPlexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Precision Plex."""
 
     VERSION = 3
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Create the options flow for an existing Precision Plex entry."""
+        return PrecisionPlexOptionsFlow(config_entry)
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
@@ -267,7 +276,15 @@ class PrecisionPlexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
 
     async def _async_pair_and_prime(self, address):
-        """Register a BlueZ agent, pair during connect, then send app init."""
+        """Register a BlueZ agent and pair/bond the Precision Plex controller.
+
+        Earlier releases attempted to write the app-init/session-prime payload
+        immediately after pairing. Field testing on a freshly restored HAOS
+        system showed that early GATT writes/reads can trigger controller-side
+        GATT "Unlikely Error" / timeout failures. Pairing only needs to create
+        the BlueZ bond and trust entry; normal runtime state is populated from
+        02AA/02BB notifications after the coordinator starts.
+        """
         from bleak import BleakClient, BleakError  # pylint: disable=import-outside-toplevel
 
         agent = BlueZPairingAgent(address)
@@ -286,8 +303,9 @@ class PrecisionPlexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if ble_device is None:
                 raise BleakError(
                     f"Precision Plex device {address} is not visible to Home Assistant "
-                    "Bluetooth. Put the console into Pair with Mobile mode, wait for "
-                    "it to advertise, then try again."
+                    "Bluetooth. Put the console into Pair with Mobile mode, keep "
+                    "pressing Pair with Mobile while it returns to its normal color, "
+                    "then try again."
                 )
 
             _LOGGER.info(
@@ -313,36 +331,7 @@ class PrecisionPlexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
                 await asyncio.sleep(1.0)
-
-                pairing_char = client.services.get_characteristic(
-                    PAIRING_CHARACTERISTIC_UUID
-                )
-                if pairing_char is None:
-                    available = []
-                    for service in client.services:
-                        for char in service.characteristics:
-                            available.append(char.uuid)
-                    raise BleakError(
-                        "Precision Plex app init characteristic "
-                        f"{PAIRING_CHARACTERISTIC_UUID} not found after pairing. "
-                        f"Available characteristics: {available}"
-                    )
-
-                _LOGGER.info(
-                    "Precision Plex setup writing app init payload %s to %s",
-                    PAIRING_INIT_PAYLOAD.hex(" "),
-                    PAIRING_CHARACTERISTIC_UUID,
-                )
-                await asyncio.wait_for(
-                    client.write_gatt_char(
-                        pairing_char,
-                        PAIRING_INIT_PAYLOAD,
-                        response=False,
-                    ),
-                    timeout=GATT_TIMEOUT,
-                )
-
-                await asyncio.sleep(0.5)
+                await agent.async_set_trusted(address, True)
 
                 _LOGGER.info(
                     "Precision Plex setup pairing/bonding complete for %s",
@@ -361,6 +350,92 @@ class PrecisionPlexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         )
         finally:
             await agent.async_unregister()
+
+
+class PrecisionPlexOptionsFlow(config_entries.OptionsFlow):
+    """Options flow for an existing Precision Plex config entry."""
+
+    def __init__(self, config_entry):
+        """Initialize the options flow."""
+        self._config_entry = config_entry
+        self._address = config_entry.data.get(CONF_ADDRESS)
+        self._unloaded_for_repair = False
+
+    async def async_step_init(self, user_input=None):
+        """Offer maintenance actions for an existing Precision Plex entry."""
+        errors = {}
+
+        if user_input is not None:
+            if user_input.get(CONF_REPAIR_START):
+                return await self.async_step_repair_pair()
+            return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_REPAIR_START, default=False): bool,
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "address": self._address or "unknown",
+            },
+        )
+
+    async def async_step_repair_pair(self, user_input=None):
+        """Re-pair an already configured Precision Plex controller."""
+        errors = {}
+
+        if self._address is None:
+            return self.async_abort(reason="unknown")
+
+        if user_input is not None:
+            if not user_input.get(CONF_PAIRING_MODE_CONFIRMED):
+                errors["base"] = "pairing_mode_required"
+            else:
+                try:
+                    await self._async_repair_pair(self._address)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "Precision Plex BLE re-pair failed for %s: %r",
+                        self._address,
+                        err,
+                        exc_info=True,
+                    )
+                    errors["base"] = "pairing_failed"
+                else:
+                    return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="repair_pair",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_PAIRING_MODE_CONFIRMED, default=False): bool,
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "address": self._address,
+            },
+        )
+
+    async def _async_repair_pair(self, address):
+        """Unload the entry, re-pair the device, then reload the entry."""
+        flow = PrecisionPlexConfigFlow()
+        flow.hass = self.hass
+
+        unloaded = False
+        try:
+            unloaded = await self.hass.config_entries.async_unload(
+                self._config_entry.entry_id
+            )
+            await flow._async_pair_and_prime(address)  # pylint: disable=protected-access
+        finally:
+            # Reload the entry even when pairing fails, so an already-working
+            # install is not left unloaded from an unsuccessful maintenance try.
+            if unloaded:
+                await self.hass.config_entries.async_reload(self._config_entry.entry_id)
 
 
 class BlueZPairingAgent:
@@ -541,6 +616,47 @@ class BlueZPairingAgent:
             )
 
         await asyncio.sleep(1.0)
+
+    async def async_set_trusted(self, address, trusted=True):
+        """Set BlueZ Device1.Trusted for the paired device when available."""
+        if self.object_manager is None or self.bus is None:
+            return
+
+        from dbus_fast import Variant  # pylint: disable=import-outside-toplevel
+
+        address = address.upper()
+        objects = await self.object_manager.call_get_managed_objects()
+
+        for path, interfaces in objects.items():
+            device = interfaces.get("org.bluez.Device1")
+            if not device:
+                continue
+
+            props_address = str(getattr(device.get("Address", ""), "value", device.get("Address", ""))).upper()
+            if props_address != address:
+                continue
+
+            introspection = await self.bus.introspect(BLUEZ_SERVICE, path)
+            device_obj = self.bus.get_proxy_object(BLUEZ_SERVICE, path, introspection)
+            props = device_obj.get_interface("org.freedesktop.DBus.Properties")
+            await props.call_set(
+                "org.bluez.Device1",
+                "Trusted",
+                Variant("b", trusted),
+            )
+            _LOGGER.info(
+                "Precision Plex set BlueZ trusted=%s for %s at %s",
+                trusted,
+                address,
+                path,
+            )
+            return
+
+        _LOGGER.info(
+            "Precision Plex could not find BlueZ device %s to set trusted=%s",
+            address,
+            trusted,
+        )
 
     async def async_unregister(self):
         """Unregister the temporary BlueZ pairing agent."""
