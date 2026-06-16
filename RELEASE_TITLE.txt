@@ -1,1 +1,1 @@
-v5.2.0 - Quadrature Slide Telemetry
+v5.2.1 - Quadrature Motion Verification

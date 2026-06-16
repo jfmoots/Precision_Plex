@@ -4,11 +4,11 @@ A custom Home Assistant integration for Precision Circuits Precision Plex system
 
 ## Current Recommended Release
 
-**v5.2.0** is the current GitHub-ready release.
+**v5.2.1** is the current GitHub-ready release.
 
-This release adds real Lippert slide position telemetry for the Bedroom, Sofa, and Wardrobe slides using ESPHome quadrature decoding of the Lippert 697096 motor Hall sensor channels. Timing-based slide position remains in place as the automatic fallback whenever ESPHome telemetry is missing, unavailable, stale, or not installed.
+This release builds on v5.2.0 by adding quadrature-only slide motion verification and retains real Lippert slide position telemetry for the Bedroom, Sofa, and Wardrobe slides using ESPHome quadrature decoding of the Lippert 697096 motor Hall sensor channels. Timing-based slide position remains in place as the automatic fallback whenever ESPHome telemetry is missing, unavailable, stale, or not installed.
 
-## v5.2.0 Highlights
+## v5.2.1 Highlights
 
 ### Quadrature-based slide position
 
@@ -45,6 +45,15 @@ Quadrature telemetry is used immediately after a Home Assistant restart when val
 
 Quadrature travel counts are treated as absolute travel position. Position updates correctly while extending and while retracting.
 
+
+### Quadrature motion verification
+
+v5.2.1 adds a protective command-stream abort for quadrature-enabled slides. When a Bedroom, Sofa, or Wardrobe slide is commanded to move and valid quadrature telemetry is available, the integration verifies that encoder travel actually changes shortly after the command begins.
+
+If no quadrature movement is detected after approximately three seconds, the BLE hold stream is stopped and a diagnostic flag is exposed. This helps avoid repeated BLE hold commands when a downstream interlock, such as ignition-on slide lockout, accepts the command path but prevents the slide from moving.
+
+This verification only runs when quadrature telemetry is available. Timing-only installations continue to behave exactly as before.
+
 ### Diagnostics
 
 Slide cover attributes now expose quadrature diagnostics, including:
@@ -56,6 +65,8 @@ quadrature_travel_total: 13875.5
 quadrature_full_travel: 13873
 quadrature_sync_error: 67
 quadrature_last_delta: 0
+motion_verification_failed: false
+motion_verification_reason: null
 ```
 
 When telemetry is unavailable, the cover falls back to timing:
@@ -105,6 +116,7 @@ Model_Georgetown_GT_34M5_w_2AC
 - Guided pairing and re-pair support
 - Native Home Assistant cover entities for the patio awning and slide rooms
 - Encoder-aware Bedroom, Sofa, and Wardrobe slide position telemetry when ESPHome quadrature nodes are available
+- Quadrature-only motion verification that aborts slide hold streams when no encoder movement is detected
 - Time-based slide and awning position fallback
 - Jog controls and endpoint reset/calibration buttons
 - Generator status, runtime, start/stop, AutoStart, and AutoStop support
@@ -127,7 +139,7 @@ For HACS custom repository use, upload the repository contents to GitHub and add
 - `custom_components/precision_plex/` - Home Assistant integration
 - `docs/` - protocol notes, reference calibrations, slide telemetry documentation, and release history
 - `dashboard/` - example Mooterhome mobile dashboard YAML
-- `RELEASE_NOTES_v5.2.0.md` - release notes for this version
+- `RELEASE_NOTES_v5.2.1.md` - release notes for this version
 
 ## Safety Notes
 

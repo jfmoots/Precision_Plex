@@ -44,6 +44,13 @@ HOLD_INTERVAL_SECONDS = 0.30
 
 SLIDE_ENDPOINT_SNAP_PERCENT = 2.0
 
+# Quadrature-only motion verification: if a supported slide is commanded
+# but encoder travel does not change shortly after the hold stream begins,
+# abort the stream. This prevents spamming BLE commands when a downstream
+# interlock, such as ignition lockout, accepts commands but prevents motion.
+MOTION_VERIFICATION_SECONDS = 3.0
+MOTION_VERIFICATION_MIN_DELTA_COUNTS = 25.0
+
 SLIDE_PULSE_TELEMETRY: dict[str, dict[str, Any]] = {
     "bed_slide": {
         "default_full_travel_pulses": 21727.0,
@@ -260,6 +267,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._motion_direction: str | None = None
         self._motion_started_at: float | None = None
         self._last_position_update_at: float | None = None
+        self._motion_verification_failed = False
+        self._motion_verification_reason: str | None = None
+        self._motion_verification_failed_at: float | None = None
 
         if not hasattr(self.coordinator, "cover_entities"):
             self.coordinator.cover_entities = {}
@@ -384,6 +394,13 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             "close_full_seconds": self._in_full_seconds(),
             "hold_interval_seconds": HOLD_INTERVAL_SECONDS,
             "jog_seconds": self._jog_seconds(),
+            "motion_verification_failed": self._motion_verification_failed,
+            "motion_verification_reason": self._motion_verification_reason,
+            "motion_verification_failed_age_seconds": (
+                round(time.time() - self._motion_verification_failed_at, 1)
+                if self._motion_verification_failed_at is not None
+                else None
+            ),
             "native_cover_entity": False,
             "legacy_cover_entity": True,
             "replacement_entity": f"{self._plex_description.name}",
@@ -588,7 +605,15 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
     ) -> None:
         """Run hold stream and clean up when complete."""
         completed_by_timeout = False
+        verification_task: asyncio.Task | None = None
         try:
+            verification_task = asyncio.create_task(
+                self._async_verify_quadrature_motion(
+                    stop_event=stop_event,
+                    max_duration_seconds=max_duration_seconds,
+                )
+            )
+
             await self.coordinator.async_write_hold_stream(
                 release_payload=release_payload,
                 hold_payload=hold_payload,
@@ -606,6 +631,19 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 err,
             )
         finally:
+            if verification_task is not None and not verification_task.done():
+                verification_task.cancel()
+                try:
+                    await verification_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Precision Plex %s motion verification task ended safely: %r",
+                        self._plex_description.key,
+                        err,
+                    )
+
             self._update_estimated_position()
 
             # If the task ended because its timer expired, snap to the expected
@@ -623,6 +661,68 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             self._hold_task = None
             self._stop_event = None
             self.async_write_ha_state()
+
+    async def _async_verify_quadrature_motion(
+        self,
+        stop_event: asyncio.Event,
+        max_duration_seconds: float,
+    ) -> None:
+        """Abort quadrature slide commands when no encoder movement is detected.
+
+        This is intentionally quadrature-only. Timing-only covers do not have a
+        reliable movement feedback signal, so they retain the legacy behavior of
+        running the hold stream for the configured duration.
+        """
+        if not self._supports_pulse_telemetry():
+            return
+
+        if max_duration_seconds < MOTION_VERIFICATION_SECONDS:
+            return
+
+        start_total = self._read_quadrature_travel_total()
+        if start_total is None:
+            return
+
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=MOTION_VERIFICATION_SECONDS,
+            )
+            return
+        except asyncio.TimeoutError:
+            pass
+
+        if stop_event.is_set():
+            return
+
+        current_total = self._read_quadrature_travel_total()
+        if current_total is None:
+            return
+
+        delta = abs(current_total - start_total)
+        if delta >= MOTION_VERIFICATION_MIN_DELTA_COUNTS:
+            self._motion_verification_failed = False
+            self._motion_verification_reason = None
+            self._motion_verification_failed_at = None
+            self.async_write_ha_state()
+            return
+
+        self._motion_verification_failed = True
+        self._motion_verification_reason = "no_quadrature_movement"
+        self._motion_verification_failed_at = time.time()
+
+        _LOGGER.info(
+            "Precision Plex %s command aborted: no quadrature movement detected "
+            "after %.1f seconds (start=%.1f current=%.1f delta=%.1f)",
+            self._plex_description.key,
+            MOTION_VERIFICATION_SECONDS,
+            start_total,
+            current_total,
+            delta,
+        )
+
+        stop_event.set()
+        self.async_write_ha_state()
 
     async def _async_stop_hold_task(self) -> None:
         """Signal any active hold stream to stop without letting it wedge HA."""
@@ -788,6 +888,10 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
         if self._last_quadrature_total is not None:
             self._last_quadrature_delta = current_total - self._last_quadrature_total
+            if abs(self._last_quadrature_delta) >= MOTION_VERIFICATION_MIN_DELTA_COUNTS:
+                self._motion_verification_failed = False
+                self._motion_verification_reason = None
+                self._motion_verification_failed_at = None
         else:
             self._last_quadrature_delta = None
 
