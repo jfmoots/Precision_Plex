@@ -34,6 +34,7 @@ async def async_setup_entry(
             PrecisionPlexPropaneHomeKitSensor(coordinator, entry),
             PrecisionPlexGeneratorRuntimeSensor(coordinator, entry),
             PrecisionPlexGeneratorStatusSensor(coordinator, entry),
+            PrecisionPlexAwningControlMethodSensor(coordinator, entry),
         ]
     )
 
@@ -432,3 +433,54 @@ class PrecisionPlexPropaneHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
     def native_value(self): return self.coordinator.lp_gas_level
     @property
     def available(self): return self.coordinator.available and self.coordinator.lp_gas_level is not None
+
+
+class PrecisionPlexAwningControlMethodSensor(PrecisionPlexBaseSensor):
+    """Diagnostic sensor showing whether awning current telemetry is available."""
+
+    _attr_name = "Awning Control Method"
+    _attr_icon = "mdi:awning"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the awning control method sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_awning_control_method"
+
+    @property
+    def native_value(self) -> str:
+        """Return current awning control method."""
+        if self._smart_awning_current_state() is not None:
+            return "Smart Current Sense"
+        return "Timed"
+
+    @property
+    def available(self) -> bool:
+        """Return availability."""
+        return True
+
+    def _smart_awning_current_state(self):
+        """Find the ESPHome awning current sensor if it is present and valid."""
+        if self.hass is None:
+            return None
+        invalid_states = ("unknown", "unavailable", None)
+        candidates = (
+            "sensor.lippert_awning_telemetry_awning_motor_current",
+            "sensor.awning_motor_current",
+        )
+        for entity_id in candidates:
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state not in invalid_states:
+                return state
+        for state in self.hass.states.async_all():
+            if state.state in invalid_states:
+                continue
+            entity_id = state.entity_id.lower()
+            friendly = str(state.attributes.get("friendly_name", "")).lower()
+            if (
+                entity_id.endswith("_awning_motor_current")
+                or friendly == "awning motor current"
+                or friendly.endswith(" awning motor current")
+            ):
+                return state
+        return None
