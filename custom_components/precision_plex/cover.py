@@ -486,6 +486,22 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
         target_position = float(max(0, min(100, target)))
         self._update_estimated_position()
+
+        # Some Home Assistant UI surfaces and HomeKit bridges send full open/close
+        # requests as SET_POSITION 100/0 instead of native open_cover/close_cover.
+        # Route those full-travel awning requests through the same smart current-
+        # sense handlers so the Carefree-style flip and retract-seat detection are
+        # used consistently everywhere.  Intermediate positions intentionally keep
+        # the existing time-based behavior because current sensing only identifies
+        # the physical endpoints, not an arbitrary percentage along the travel.
+        if self._is_awning() and self._smart_awning_available():
+            if target_position >= 99.0:
+                await self._async_start_smart_awning_open()
+                return
+            if target_position <= 1.0:
+                await self._async_start_smart_awning_close()
+                return
+
         delta = target_position - self._estimated_position
 
         if abs(delta) < 1.0:

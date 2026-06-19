@@ -4,9 +4,7 @@ A custom Home Assistant integration for Precision Circuits Precision Plex system
 
 ## Current Recommended Release
 
-**v5.3.5** is the current GitHub-ready release.
-
-This release adds Smart Current Sense Awning Control using optional ACS758 telemetry while retaining quadrature slide telemetry.
+**v5.2.1** is the current GitHub-ready release.
 
 This release builds on v5.2.0 by adding quadrature-only slide motion verification and retains real Lippert slide position telemetry for the Bedroom, Sofa, and Wardrobe slides using ESPHome quadrature decoding of the Lippert 697096 motor Hall sensor channels. Timing-based slide position remains in place as the automatic fallback whenever ESPHome telemetry is missing, unavailable, stale, or not installed.
 
@@ -146,8 +144,3 @@ For HACS custom repository use, upload the repository contents to GitHub and add
 ## Safety Notes
 
 Slide and awning controls move large mechanical equipment. Keep the physical wall controls available and maintain line-of-sight when testing. Quadrature telemetry improves position feedback but does not replace the Lippert controller's built-in safety and synchronization logic.
-
-
-## Smart Current Sense Awning Control
-
-Optional ESPHome ACS758 telemetry enables arm-lock detection, Carefree-style fabric tightening, and seated-awning retract detection. Configuration is exposed directly in Home Assistant and automatically falls back to time-based operation when telemetry is unavailable.

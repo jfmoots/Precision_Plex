@@ -1,1 +1,1 @@
-v5.3.1 — Smart Awning Control Test 2
+v5.3.6 – Smart Awning Cover Routing Fix
