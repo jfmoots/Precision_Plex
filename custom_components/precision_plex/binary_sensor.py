@@ -27,6 +27,7 @@ async def async_setup_entry(
         for key, description in STATE_BITS.items()
     ]
     entities.append(PrecisionPlexGeneratorRunningBinarySensor(coordinator, entry))
+    entities.append(PrecisionPlexBleConnectedBinarySensor(coordinator, entry))
     async_add_entities(entities)
 
 
@@ -194,4 +195,70 @@ class PrecisionPlexGeneratorRunningBinarySensor(BinarySensorEntity):
             ),
             "raw_02aa": raw.hex(" ") if raw is not None else None,
             "mapping": "0x10=running; managed transitions exposed by Generator Status sensor",
+        }
+
+
+class PrecisionPlexBleConnectedBinarySensor(BinarySensorEntity):
+    """Diagnostic binary sensor showing BLE connection health."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_name = "BLE Connected"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+
+    def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
+        """Initialize sensor."""
+        self.coordinator = coordinator
+        self.entry = entry
+        self._attr_unique_id = f"{coordinator.address}_ble_connected"
+        self._remove_listener = None
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to coordinator updates."""
+        self._remove_listener = self.coordinator.async_add_listener(
+            self._handle_coordinator_update
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unsubscribe from coordinator updates."""
+        if self._remove_listener is not None:
+            self._remove_listener()
+            self._remove_listener = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated BLE health."""
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool:
+        """Return BLE connection state."""
+        return self.coordinator.ble_connected
+
+    @property
+    def available(self) -> bool:
+        """BLE health sensor should always be visible."""
+        return True
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
+            "name": "Precision Plex",
+            "manufacturer": "Precision Circuits",
+            "model": "Precision Plex Wireless TP Monitor",
+        }
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return diagnostic attributes."""
+        return {
+            "last_ble_connect_time": self.coordinator.last_ble_connect_time,
+            "last_ble_disconnect_time": self.coordinator.last_ble_disconnect_time,
+            "ble_reconnect_count": self.coordinator.ble_reconnect_count,
+            "ble_disconnect_count": self.coordinator.ble_disconnect_count,
+            "last_valid_packet_time": self.coordinator.last_valid_packet_time,
+            "last_valid_packet_age_seconds": self.coordinator.last_valid_packet_age_seconds,
         }

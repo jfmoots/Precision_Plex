@@ -1,5 +1,12 @@
 # Release History
 
+## v5.3.7 - BLE Hardening and Packet Validation
+
+- Added packet health diagnostics for rejected 02AA and 02BB frames.
+- Added 02BB state-change confirmation to suppress one-sample switch/status ghosts.
+- Added coach battery voltage range and jump confirmation for 02AA telemetry.
+- Added BLE hold-stream reconnect/retry behavior for long-running cover commands.
+
 ## v5.2.0 - Quadrature Slide Telemetry
 
 - Added Bedroom Slide quadrature telemetry support.

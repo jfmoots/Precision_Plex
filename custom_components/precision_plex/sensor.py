@@ -35,6 +35,18 @@ async def async_setup_entry(
             PrecisionPlexGeneratorRuntimeSensor(coordinator, entry),
             PrecisionPlexGeneratorStatusSensor(coordinator, entry),
             PrecisionPlexAwningControlMethodSensor(coordinator, entry),
+            PrecisionPlexBleLastValidPacketSensor(coordinator, entry),
+            PrecisionPlexBlePacketAgeSensor(coordinator, entry),
+            PrecisionPlexBleReconnectCountSensor(coordinator, entry),
+            PrecisionPlexBleDisconnectCountSensor(coordinator, entry),
+            PrecisionPlexBlePacketsReceivedSensor(coordinator, entry),
+            PrecisionPlexBlePacketsRejectedSensor(coordinator, entry),
+            PrecisionPlexBleRejected02AASensor(coordinator, entry),
+            PrecisionPlexBleRejected02BBSensor(coordinator, entry),
+            PrecisionPlexBleLastRejectReasonSensor(coordinator, entry),
+            PrecisionPlexCommandStreamRecoveriesSensor(coordinator, entry),
+            PrecisionPlexCommandStreamInterruptionsSensor(coordinator, entry),
+            PrecisionPlexCommandStreamLastErrorSensor(coordinator, entry),
         ]
     )
 
@@ -115,6 +127,11 @@ class PrecisionPlexCoachBatterySensor(PrecisionPlexBaseSensor):
             "source_characteristic": "02AA",
             "raw_tenths": raw_word,
             "raw_02aa": raw.hex(" ") if raw is not None else None,
+            "rejected_02aa_count": self.coordinator.rejected_02aa_count,
+            "last_rejected_packet_reason": self.coordinator.last_rejected_packet_reason,
+            "pending_voltage_tenths": self.coordinator.pending_coach_voltage_tenths,
+            "rejected_voltage_tenths": self.coordinator.rejected_coach_voltage_tenths,
+            "rejected_voltage_reason": self.coordinator.rejected_coach_voltage_reason,
         }
 
 
@@ -484,3 +501,213 @@ class PrecisionPlexAwningControlMethodSensor(PrecisionPlexBaseSensor):
             ):
                 return state
         return None
+
+
+class PrecisionPlexDiagnosticCounterSensor(PrecisionPlexBaseSensor):
+    """Base class for numeric BLE diagnostic counters."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:counter"
+
+    @property
+    def available(self) -> bool:
+        """Return availability."""
+        return True
+
+
+class PrecisionPlexBleLastValidPacketSensor(PrecisionPlexBaseSensor):
+    """Timestamp of the last accepted Precision Plex BLE packet."""
+
+    _attr_name = "BLE Last Valid Packet"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:bluetooth-transfer"
+
+    def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
+        """Initialize sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_last_valid_packet"
+
+    @property
+    def native_value(self):
+        """Return timestamp of last accepted BLE packet."""
+        return self.coordinator.last_valid_packet_time
+
+    @property
+    def available(self) -> bool:
+        """Return availability."""
+        return self.coordinator.last_valid_packet_time is not None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return diagnostic details."""
+        return {
+            "last_valid_source": self.coordinator.last_valid_packet_source,
+            "last_valid_02aa": self.coordinator.last_valid_02aa_time,
+            "last_valid_02bb": self.coordinator.last_valid_02bb_time,
+            "last_packet_age_seconds": self.coordinator.last_valid_packet_age_seconds,
+        }
+
+
+class PrecisionPlexBlePacketAgeSensor(PrecisionPlexBaseSensor):
+    """Age of the last accepted Precision Plex BLE packet."""
+
+    _attr_name = "BLE Last Packet Age"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:timer-outline"
+
+    def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
+        """Initialize sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_last_packet_age"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return packet age in seconds."""
+        return self.coordinator.last_valid_packet_age_seconds
+
+    @property
+    def available(self) -> bool:
+        """Return availability."""
+        return self.coordinator.last_valid_packet_time is not None
+
+
+class PrecisionPlexBleReconnectCountSensor(PrecisionPlexDiagnosticCounterSensor):
+    _attr_name = "BLE Reconnect Count"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_reconnect_count"
+    @property
+    def native_value(self): return self.coordinator.ble_reconnect_count
+    @property
+    def extra_state_attributes(self): return {"last_ble_connect_time": self.coordinator.last_ble_connect_time}
+
+
+class PrecisionPlexBleDisconnectCountSensor(PrecisionPlexDiagnosticCounterSensor):
+    _attr_name = "BLE Disconnect Count"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_disconnect_count"
+    @property
+    def native_value(self): return self.coordinator.ble_disconnect_count
+    @property
+    def extra_state_attributes(self): return {"last_ble_disconnect_time": self.coordinator.last_ble_disconnect_time}
+
+
+class PrecisionPlexBlePacketsReceivedSensor(PrecisionPlexDiagnosticCounterSensor):
+    _attr_name = "BLE Packets Accepted"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_packets_accepted"
+    @property
+    def native_value(self): return self.coordinator.packets_received_count
+    @property
+    def extra_state_attributes(self):
+        return {
+            "accepted_02aa": self.coordinator.received_02aa_count,
+            "accepted_02bb": self.coordinator.received_02bb_count,
+        }
+
+
+class PrecisionPlexBlePacketsRejectedSensor(PrecisionPlexDiagnosticCounterSensor):
+    _attr_name = "BLE Packets Rejected"
+    _attr_icon = "mdi:packet-remove"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_packets_rejected"
+    @property
+    def native_value(self): return self.coordinator.packets_rejected_count
+    @property
+    def extra_state_attributes(self):
+        return {
+            "rejected_02aa": self.coordinator.rejected_02aa_count,
+            "rejected_02bb": self.coordinator.rejected_02bb_count,
+            "last_rejected_packet_reason": self.coordinator.last_rejected_packet_reason,
+            "last_rejected_packet_source": self.coordinator.last_rejected_packet_source,
+            "last_rejected_packet_hex": self.coordinator.last_rejected_packet_hex,
+            "suppressed_02bb_glitch_count": self.coordinator.suppressed_02bb_glitch_count,
+        }
+
+
+class PrecisionPlexBleRejected02AASensor(PrecisionPlexDiagnosticCounterSensor):
+    _attr_name = "BLE 02AA Rejected"
+    _attr_icon = "mdi:packet-remove"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_02aa_rejected"
+    @property
+    def native_value(self): return self.coordinator.rejected_02aa_count
+
+
+class PrecisionPlexBleRejected02BBSensor(PrecisionPlexDiagnosticCounterSensor):
+    _attr_name = "BLE 02BB Rejected"
+    _attr_icon = "mdi:packet-remove"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_02bb_rejected"
+    @property
+    def native_value(self): return self.coordinator.rejected_02bb_count
+    @property
+    def extra_state_attributes(self): return {"suppressed_02bb_glitch_count": self.coordinator.suppressed_02bb_glitch_count}
+
+
+class PrecisionPlexBleLastRejectReasonSensor(PrecisionPlexBaseSensor):
+    """Last BLE packet rejection reason."""
+
+    _attr_name = "BLE Last Reject Reason"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:alert-circle-outline"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_last_reject_reason"
+
+    @property
+    def native_value(self):
+        return self.coordinator.last_rejected_packet_reason or "none"
+
+    @property
+    def available(self): return True
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "source": self.coordinator.last_rejected_packet_source,
+            "raw": self.coordinator.last_rejected_packet_hex,
+        }
+
+
+class PrecisionPlexCommandStreamRecoveriesSensor(PrecisionPlexDiagnosticCounterSensor):
+    _attr_name = "BLE Command Stream Recoveries"
+    _attr_icon = "mdi:bluetooth-connect"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_command_stream_recoveries"
+    @property
+    def native_value(self): return self.coordinator.hold_stream_recoveries
+
+
+class PrecisionPlexCommandStreamInterruptionsSensor(PrecisionPlexDiagnosticCounterSensor):
+    _attr_name = "BLE Command Stream Interruptions"
+    _attr_icon = "mdi:bluetooth-off"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_command_stream_interruptions"
+    @property
+    def native_value(self): return self.coordinator.hold_stream_interruption_count
+
+
+class PrecisionPlexCommandStreamLastErrorSensor(PrecisionPlexBaseSensor):
+    _attr_name = "BLE Command Stream Last Error"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:alert-outline"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_command_stream_last_error"
+    @property
+    def native_value(self): return self.coordinator.last_hold_stream_error or "none"
+    @property
+    def available(self): return True

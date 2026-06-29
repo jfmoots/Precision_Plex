@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from collections.abc import Callable
 from contextlib import suppress
 
@@ -15,6 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.start import async_at_started
+from homeassistant.util import dt as dt_util
 
 from .const import (
     PAIRING_CHARACTERISTIC_UUID,
@@ -34,6 +36,11 @@ GATT_TIMEOUT = 8.0
 RECONNECT_DELAY_SECONDS = 4.0
 GENERATOR_RUNTIME_MAX_PLAUSIBLE_TENTHS = 10000  # 1000.0 hours; protects against misdecoded 02AA frames
 GENERATOR_RUNTIME_MAX_JUMP_TENTHS = 50  # 5.0 hours between accepted samples is implausible for live telemetry
+COACH_VOLTAGE_MIN_TENTHS = 100
+COACH_VOLTAGE_MAX_TENTHS = 158
+COACH_VOLTAGE_MAX_UNCONFIRMED_JUMP_TENTHS = 10
+STATE_FRAME_MIN_LEN = 4
+STATE_FRAME_MAX_LEN = 20
 
 BLE_EXCEPTIONS = (
     BleakError,
@@ -83,6 +90,35 @@ class PrecisionPlexStateCoordinator:
         self.ignored_generator_runtime_tenths: int | None = None
         self.ignored_generator_runtime_reason: str | None = None
         self.available = False
+
+        # BLE/packet health diagnostics. These counters are intentionally kept
+        # in the coordinator so diagnostics can distinguish real state changes
+        # from rejected one-frame telemetry ghosts.
+        self.rejected_02aa_count: int = 0
+        self.rejected_02bb_count: int = 0
+        self.last_rejected_packet_reason: str | None = None
+        self.last_rejected_packet_source: str | None = None
+        self.last_rejected_packet_hex: str | None = None
+        self.pending_02bb_words: list[int] | None = None
+        self.pending_02bb_confirmations: int = 0
+        self.suppressed_02bb_glitch_count: int = 0
+        self.pending_coach_voltage_tenths: int | None = None
+        self.pending_coach_voltage_confirmations: int = 0
+        self.rejected_coach_voltage_tenths: int | None = None
+        self.rejected_coach_voltage_reason: str | None = None
+        self.ble_reconnect_count: int = 0
+        self.ble_disconnect_count: int = 0
+        self.received_02aa_count: int = 0
+        self.received_02bb_count: int = 0
+        self.last_valid_02aa_time: datetime | None = None
+        self.last_valid_02bb_time: datetime | None = None
+        self.last_valid_packet_time: datetime | None = None
+        self.last_valid_packet_source: str | None = None
+        self.last_ble_connect_time: datetime | None = None
+        self.last_ble_disconnect_time: datetime | None = None
+        self.hold_stream_recoveries: int = 0
+        self.hold_stream_interruption_count: int = 0
+        self.last_hold_stream_error: str | None = None
 
         self._client: BleakClientWithServiceCache | None = None
         self._task: asyncio.Task | None = None
@@ -180,6 +216,12 @@ class PrecisionPlexStateCoordinator:
         self.ignored_generator_runtime_tenths = None
         self.ignored_generator_runtime_reason = None
         self.raw_battery_state = None
+        self.pending_02bb_words = None
+        self.pending_02bb_confirmations = 0
+        self.pending_coach_voltage_tenths = None
+        self.pending_coach_voltage_confirmations = 0
+        self.rejected_coach_voltage_tenths = None
+        self.rejected_coach_voltage_reason = None
         self._notify_listeners()
         self._listeners.clear()
 
@@ -206,6 +248,28 @@ class PrecisionPlexStateCoordinator:
         if not self.state_words or word_index >= len(self.state_words):
             return None
         return bool(self.state_words[word_index] & bit)
+
+    @property
+    def ble_connected(self) -> bool:
+        """Return whether the BLE client is currently connected and healthy."""
+        return bool(self._client is not None and self._client.is_connected and self.available)
+
+    @property
+    def packets_received_count(self) -> int:
+        """Return total accepted Precision Plex notification packets."""
+        return self.received_02aa_count + self.received_02bb_count
+
+    @property
+    def packets_rejected_count(self) -> int:
+        """Return total rejected Precision Plex notification packets."""
+        return self.rejected_02aa_count + self.rejected_02bb_count
+
+    @property
+    def last_valid_packet_age_seconds(self) -> int | None:
+        """Return age of the last accepted packet in seconds."""
+        if self.last_valid_packet_time is None:
+            return None
+        return max(0, int((dt_util.utcnow() - self.last_valid_packet_time).total_seconds()))
 
     async def _connection_loop(self) -> None:
         """Keep a read-only BLE subscription active."""
@@ -245,6 +309,8 @@ class PrecisionPlexStateCoordinator:
     def _disconnected_callback(self, client: BleakClientWithServiceCache) -> None:
         """Handle BLE disconnection."""
         self.available = False
+        self.ble_disconnect_count += 1
+        self.last_ble_disconnect_time = dt_util.utcnow()
 
         if self._stopped or self.hass.loop.is_closed():
             return
@@ -276,6 +342,8 @@ class PrecisionPlexStateCoordinator:
         # bleak-retry-connector to perform multiple long attempts in one call
         # delays entity availability after startup. The outer loop retries
         # quickly instead.
+        self.ble_reconnect_count += 1
+        self.last_ble_connect_time = dt_util.utcnow()
         self._client = await establish_connection(
             BleakClientWithServiceCache,
             ble_device,
@@ -400,11 +468,34 @@ class PrecisionPlexStateCoordinator:
                 return client, control_char
 
             async def _write(payload: bytes) -> None:
-                active_client, active_char = await _get_control_char()
-                await asyncio.wait_for(
-                    active_client.write_gatt_char(active_char, payload, response=True),
-                    timeout=GATT_TIMEOUT,
-                )
+                nonlocal client, control_char
+                last_error: Exception | None = None
+                for attempt in range(2):
+                    try:
+                        active_client, active_char = await _get_control_char()
+                        await asyncio.wait_for(
+                            active_client.write_gatt_char(active_char, payload, response=True),
+                            timeout=GATT_TIMEOUT,
+                        )
+                        return
+                    except BLE_EXCEPTIONS as err:
+                        last_error = err
+                        self.last_hold_stream_error = repr(err)
+                        self.hold_stream_recoveries += 1
+                        _LOGGER.debug(
+                            "Precision Plex hold stream write failed on attempt %s; reconnecting before retry: %r",
+                            attempt + 1,
+                            err,
+                        )
+                        await self._async_disconnect()
+                        client = None
+                        control_char = None
+                        if attempt == 0 and not self._stopped:
+                            await asyncio.sleep(0.20)
+                            continue
+                        raise
+                if last_error is not None:
+                    raise last_error
 
             async def _best_effort_release() -> None:
                 try:
@@ -429,8 +520,12 @@ class PrecisionPlexStateCoordinator:
                         pass
 
             except BLE_EXCEPTIONS as err:
+                self.hold_stream_interruption_count += 1
+                self.last_hold_stream_error = repr(err)
                 _LOGGER.warning("Precision Plex hold stream stopped after BLE error: %r", err)
             except Exception as err:
+                self.hold_stream_interruption_count += 1
+                self.last_hold_stream_error = repr(err)
                 _LOGGER.warning("Precision Plex hold stream stopped after unexpected error: %r", err)
             finally:
                 await _best_effort_release()
@@ -542,18 +637,104 @@ class PrecisionPlexStateCoordinator:
         sender_handle = sender if isinstance(sender, int) else getattr(sender, "handle", None)
         self._apply_battery_state(bytes(data), "02AA notify", sender_handle)
 
+    def _reject_packet(self, packet_type: str, raw: bytes, source: str, reason: str, sender: int | None = None) -> None:
+        """Record and log a rejected BLE packet without updating user-facing state."""
+        if packet_type == "02AA":
+            self.rejected_02aa_count += 1
+        elif packet_type == "02BB":
+            self.rejected_02bb_count += 1
+
+        self.last_rejected_packet_reason = reason
+        self.last_rejected_packet_source = source
+        self.last_rejected_packet_hex = raw.hex(" ")
+
+        _LOGGER.debug(
+            "Precision Plex rejected %s packet from %s sender=%s reason=%s raw_len=%s raw=%s",
+            packet_type,
+            source,
+            f"0x{sender:04X}" if isinstance(sender, int) else None,
+            reason,
+            len(raw),
+            raw.hex(" "),
+        )
+
+        if not self.hass.loop.is_closed():
+            self.hass.loop.call_soon_threadsafe(self._notify_listeners)
+
+    def _is_valid_02bb_frame(self, raw: bytes) -> tuple[bool, str | None]:
+        """Validate a 02BB state frame before publishing decoded state bits.
+
+        02BB carries app-visible state words. A single malformed 02BB sample can
+        briefly flip switches such as the water heater off/on in Home Assistant
+        history. Keep validation conservative: accept normal even-length state
+        frames and let the state-word confirmation filter below suppress
+        one-frame ghosts.
+        """
+        if len(raw) < STATE_FRAME_MIN_LEN:
+            return False, "too_short"
+        if len(raw) > STATE_FRAME_MAX_LEN:
+            return False, "too_long"
+        if len(raw) % 2 != 0:
+            return False, "odd_length"
+        if raw == self.raw_battery_state:
+            return False, "matches_last_02aa"
+        return True, None
+
     def _apply_state(self, raw: bytes, source: str, sender: int | None = None) -> None:
         """Decode and store state from Precision Plex monitor notifications."""
-        if self._stopped or len(raw) < 2:
+        if self._stopped:
             return
 
-        self.raw_state = raw
-        self.state_words = [
+        valid, reason = self._is_valid_02bb_frame(raw)
+        if not valid:
+            self._reject_packet("02BB", raw, source, reason or "invalid", sender)
+            return
+
+        candidate_words = [
             int.from_bytes(raw[index:index + 2], "big")
             for index in range(0, len(raw) - 1, 2)
         ]
+
+        # Publish the first valid state frame immediately at startup. Once a
+        # stable state exists, require a changed 02BB frame to repeat once before
+        # publishing it. That filters ON/OFF/ON one-sample ghosts while still
+        # allowing real wall-panel/app state changes through on the next frame.
+        if self.state_words and candidate_words != self.state_words:
+            if self.pending_02bb_words == candidate_words:
+                self.pending_02bb_confirmations += 1
+            else:
+                if self.pending_02bb_words is not None and candidate_words == self.state_words:
+                    self.suppressed_02bb_glitch_count += 1
+                    self._reject_packet("02BB", raw, source, "single_sample_state_glitch", sender)
+                    self.pending_02bb_words = None
+                    self.pending_02bb_confirmations = 0
+                    return
+
+                self.pending_02bb_words = candidate_words
+                self.pending_02bb_confirmations = 1
+                _LOGGER.debug(
+                    "Precision Plex 02BB changed state pending confirmation from %s sender=%s candidate=%s current=%s raw=%s",
+                    source,
+                    f"0x{sender:04X}" if isinstance(sender, int) else None,
+                    [f"0x{word:04X}" for word in candidate_words],
+                    [f"0x{word:04X}" for word in self.state_words],
+                    raw.hex(" "),
+                )
+                return
+
+            if self.pending_02bb_confirmations < 2:
+                return
+
+        self.pending_02bb_words = None
+        self.pending_02bb_confirmations = 0
+        self.raw_state = raw
+        self.state_words = candidate_words
         self.state_word = self.state_words[0] if self.state_words else None
         self.available = True
+        self.received_02bb_count += 1
+        self.last_valid_02bb_time = dt_util.utcnow()
+        self.last_valid_packet_time = self.last_valid_02bb_time
+        self.last_valid_packet_source = source
 
         _LOGGER.debug(
             "Precision Plex 02BB %s sender=%s raw=%s state_words=%s coach_voltage=%s",
@@ -617,13 +798,7 @@ class PrecisionPlexStateCoordinator:
             return
 
         if self._is_likely_shifted_02aa_frame(raw):
-            _LOGGER.debug(
-                "Precision Plex rejected misaligned 02AA frame before decode from %s sender=%s raw_len=%s raw=%s",
-                source,
-                f"0x{sender:04X}" if isinstance(sender, int) else None,
-                len(raw),
-                raw.hex(" "),
-            )
+            self._reject_packet("02AA", raw, source, "misaligned_or_invalid_shape", sender)
             return
 
         raw_voltage = int.from_bytes(raw[0:2], "big")
@@ -632,18 +807,48 @@ class PrecisionPlexStateCoordinator:
         #   00 88 -> 136 -> 13.6 V
         #   00 7D -> 125 -> 12.5 V
         #   00 83 -> 131 -> 13.1 V
-        if 80 <= raw_voltage <= 180:
-            self.coach_voltage = raw_voltage / 10
-            self.raw_battery_state = raw
-            self.available = True
-        else:
-            _LOGGER.debug(
-                "Precision Plex 02AA voltage field ignored from %s sender=%s raw=%s raw_word=0x%04X",
-                source,
-                f"0x{sender:04X}" if isinstance(sender, int) else None,
-                raw.hex(" "),
-                raw_voltage,
+        voltage_accepted = False
+        if COACH_VOLTAGE_MIN_TENTHS <= raw_voltage <= COACH_VOLTAGE_MAX_TENTHS:
+            previous_voltage_tenths = (
+                int(round(self.coach_voltage * 10)) if self.coach_voltage is not None else None
             )
+            voltage_jump = (
+                abs(raw_voltage - previous_voltage_tenths)
+                if previous_voltage_tenths is not None
+                else 0
+            )
+
+            if previous_voltage_tenths is None or voltage_jump <= COACH_VOLTAGE_MAX_UNCONFIRMED_JUMP_TENTHS:
+                voltage_accepted = True
+            elif self.pending_coach_voltage_tenths == raw_voltage:
+                self.pending_coach_voltage_confirmations += 1
+                voltage_accepted = self.pending_coach_voltage_confirmations >= 2
+            else:
+                self.pending_coach_voltage_tenths = raw_voltage
+                self.pending_coach_voltage_confirmations = 1
+                self.rejected_coach_voltage_tenths = raw_voltage
+                self.rejected_coach_voltage_reason = "pending_jump_confirmation"
+                _LOGGER.debug(
+                    "Precision Plex 02AA voltage jump pending confirmation from %s sender=%s raw=%s candidate=%.1f previous=%s",
+                    source,
+                    f"0x{sender:04X}" if isinstance(sender, int) else None,
+                    raw.hex(" "),
+                    raw_voltage / 10,
+                    self.coach_voltage,
+                )
+
+            if voltage_accepted:
+                self.coach_voltage = raw_voltage / 10
+                self.pending_coach_voltage_tenths = None
+                self.pending_coach_voltage_confirmations = 0
+                self.rejected_coach_voltage_tenths = None
+                self.rejected_coach_voltage_reason = None
+                self.raw_battery_state = raw
+                self.available = True
+        else:
+            self.rejected_coach_voltage_tenths = raw_voltage
+            self.rejected_coach_voltage_reason = "out_of_range"
+            self._reject_packet("02AA", raw, source, f"voltage_out_of_range_0x{raw_voltage:04X}", sender)
 
         tank_map = {0x00: 0, 0x03: 33, 0x06: 67, 0x0A: 100}
 

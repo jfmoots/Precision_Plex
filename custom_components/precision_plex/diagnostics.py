@@ -169,7 +169,29 @@ async def async_get_config_entry_diagnostics(
                 "raw_status_word": _hex_int(getattr(coordinator, "raw_generator_status_word", None), 4),
                 "raw_runtime_tenths": getattr(coordinator, "raw_generator_runtime_tenths", None),
             },
-            "ble": _client_diagnostics(coordinator),
+            "packet_health": {
+                "rejected_02aa_count": getattr(coordinator, "rejected_02aa_count", None),
+                "rejected_02bb_count": getattr(coordinator, "rejected_02bb_count", None),
+                "suppressed_02bb_glitch_count": getattr(coordinator, "suppressed_02bb_glitch_count", None),
+                "last_rejected_packet_reason": getattr(coordinator, "last_rejected_packet_reason", None),
+                "last_rejected_packet_source": getattr(coordinator, "last_rejected_packet_source", None),
+                "last_rejected_packet_hex": getattr(coordinator, "last_rejected_packet_hex", None),
+                "pending_02bb_words": [
+                    _hex_int(word, 4)
+                    for word in (getattr(coordinator, "pending_02bb_words", None) or [])
+                ],
+                "pending_02bb_confirmations": getattr(coordinator, "pending_02bb_confirmations", None),
+                "pending_coach_voltage_tenths": getattr(coordinator, "pending_coach_voltage_tenths", None),
+                "pending_coach_voltage_confirmations": getattr(coordinator, "pending_coach_voltage_confirmations", None),
+                "rejected_coach_voltage_tenths": getattr(coordinator, "rejected_coach_voltage_tenths", None),
+                "rejected_coach_voltage_reason": getattr(coordinator, "rejected_coach_voltage_reason", None),
+            },
+            "ble": {
+                **_client_diagnostics(coordinator),
+                "reconnect_count": getattr(coordinator, "ble_reconnect_count", None),
+                "hold_stream_recoveries": getattr(coordinator, "hold_stream_recoveries", None),
+                "last_hold_stream_error": getattr(coordinator, "last_hold_stream_error", None),
+            },
         },
     }
 

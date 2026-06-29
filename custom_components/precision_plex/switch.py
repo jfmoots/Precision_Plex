@@ -109,6 +109,10 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
                 if self.coordinator.raw_state is not None
                 else None
             ),
+            "rejected_02bb_count": self.coordinator.rejected_02bb_count,
+            "suppressed_02bb_glitch_count": self.coordinator.suppressed_02bb_glitch_count,
+            "last_rejected_packet_reason": self.coordinator.last_rejected_packet_reason,
+            "pending_02bb_confirmations": self.coordinator.pending_02bb_confirmations,
             "command_mode": "state_aware_toggle",
         }
 

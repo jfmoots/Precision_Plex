@@ -1,1 +1,1 @@
-Precision Plex v5.3.6a — Integration Icons
+Precision Plex v5.3.7 — BLE Hardening and Packet Validation
