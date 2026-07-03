@@ -176,6 +176,17 @@ async def async_get_config_entry_diagnostics(
                 "last_rejected_packet_reason": getattr(coordinator, "last_rejected_packet_reason", None),
                 "last_rejected_packet_source": getattr(coordinator, "last_rejected_packet_source", None),
                 "last_rejected_packet_hex": getattr(coordinator, "last_rejected_packet_hex", None),
+                "last_rejected_packet_changed_byte_indices": getattr(coordinator, "last_rejected_packet_changed_byte_indices", []),
+                "last_rejected_packet_changed_byte_count": getattr(coordinator, "last_rejected_packet_changed_byte_count", None),
+                "last_rejected_packet_changed_bytes": getattr(coordinator, "last_rejected_packet_changed_bytes", []),
+                "last_rejected_packet_seconds_since_last_good": getattr(coordinator, "last_rejected_packet_seconds_since_last_good", None),
+                "last_rejected_packet_seconds_since_connect": getattr(coordinator, "last_rejected_packet_seconds_since_connect", None),
+                "last_rejected_packet_variant": getattr(coordinator, "last_rejected_packet_variant", None),
+                "rejected_packet_variant_counts": getattr(coordinator, "rejected_packet_variant_counts", {}),
+                "rejected_packet_changed_byte_counts": getattr(coordinator, "rejected_packet_changed_byte_counts", {}),
+                "rejected_packet_changed_value_counts": getattr(coordinator, "rejected_packet_changed_value_counts", {}),
+                "rejected_packet_log": getattr(coordinator, "rejected_packet_log", []),
+                "max_rejected_packet_log_entries": getattr(coordinator, "max_rejected_packet_log_entries", None),
                 "pending_02bb_words": [
                     _hex_int(word, 4)
                     for word in (getattr(coordinator, "pending_02bb_words", None) or [])

@@ -8,7 +8,7 @@ This custom integration provides local control and monitoring of supported Preci
 
 ## Current Stable Release
 
-**v5.3.7**
+**v5.3.10**
 
 v5.3.7 is a BLE hardening and telemetry validation release based on the stable v5.3.6 feature set. It adds additional protection against one-sample BLE telemetry glitches and improves command-stream recovery for long-running cover commands.
 
@@ -145,3 +145,12 @@ The long-term goal is a single Precision Plex integration with a shared telemetr
 Slides, awnings, generators, water heaters, and other RV systems control real physical equipment. Maintain line-of-sight when testing movement commands and keep factory controls available.
 
 This integration supplements the factory Precision Plex system. It does not replace manufacturer safety systems, interlocks, or required operating procedures.
+
+## BLE Packet Forensics
+
+v5.3.8 adds a rolling rejected-packet forensic buffer. The integration stores the most recent rejected BLE packets as diagnostic data, including timestamp, packet type, reject reason, length, sender handle, and raw hex payload.
+
+v5.3.10 expands the packet forensics added in v5.3.8 with bounded comparison diagnostics. Rejected packets are now compared against the last accepted packet of the same type, recording changed byte indexes, expected/actual byte values, seconds since the last good packet, and seconds since BLE connect. The forensic buffer remains capped at 100 entries and continues to avoid log spam.
+
+
+This is intended for field troubleshooting in RF-noisy environments such as campgrounds, where malformed or misaligned BLE notifications may occur intermittently.

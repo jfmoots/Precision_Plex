@@ -1,1 +1,1 @@
-Precision Plex v5.3.7 — BLE Hardening and Packet Validation
+Precision Plex v5.3.19 — Config Flow Discovery Fix

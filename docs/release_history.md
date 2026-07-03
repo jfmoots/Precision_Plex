@@ -191,3 +191,12 @@
 - Added optional Wardrobe Slide ESPHome pulse telemetry support.
 - Added Wardrobe Slide pulse travel/sync diagnostics and endpoint snapping.
 - Preserved time-based fallback when telemetry is unavailable.
+
+## v5.3.8 — BLE Packet Forensics
+
+Adds deeper BLE rejected-packet diagnostics including last rejected packet hex, packet length, packet type, rejection percentage, reason counts, packet length counts, packet type counts, and a Reset BLE Diagnostics button.
+
+
+## v5.3.10
+
+BLE variant diagnostics for rejected 02AA packet forensics. Adds variant classification, changed-byte value summaries, and fixes 02AA seconds-since-last-good timing while keeping all forensic buffers bounded.

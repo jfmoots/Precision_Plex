@@ -8,6 +8,10 @@ from typing import Any
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
+try:
+    from homeassistant.const import UnitOfElectricCurrent
+except ImportError:  # older HA fallback
+    UnitOfElectricCurrent = None
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity import EntityCategory
@@ -22,7 +26,7 @@ DEFAULT_RUNTIME_SETTINGS: dict[str, float] = {
     "awning_open_seconds": 18.0,
     "awning_close_seconds": 25.0,
     "awning_jog_seconds": 2.0,
-    "awning_arm_lock_threshold": 8.0,
+    "awning_arm_lock_threshold": 6.0,
     "awning_current_confirm_milliseconds": 300.0,
     "awning_current_ignore_seconds": 2.0,
     "awning_extend_overrun_milliseconds": 100.0,
@@ -50,6 +54,7 @@ class PrecisionPlexNumberDescription:
     minimum: float = 1.0
     maximum: float = 90.0
     step: float = 0.5
+    unit: str | None = UnitOfTime.SECONDS
 
 
 NUMBERS: tuple[PrecisionPlexNumberDescription, ...] = (
@@ -78,6 +83,7 @@ NUMBERS: tuple[PrecisionPlexNumberDescription, ...] = (
         minimum=4.0,
         maximum=20.0,
         step=0.25,
+        unit=(UnitOfElectricCurrent.AMPERE if UnitOfElectricCurrent else "A"),
     ),
     PrecisionPlexNumberDescription(
         key="awning_current_confirm_milliseconds",
@@ -86,6 +92,7 @@ NUMBERS: tuple[PrecisionPlexNumberDescription, ...] = (
         minimum=100.0,
         maximum=2000.0,
         step=50.0,
+        unit=UnitOfTime.MILLISECONDS,
     ),
     PrecisionPlexNumberDescription(
         key="awning_current_ignore_seconds",
@@ -102,6 +109,7 @@ NUMBERS: tuple[PrecisionPlexNumberDescription, ...] = (
         minimum=0.0,
         maximum=5000.0,
         step=50.0,
+        unit=UnitOfTime.MILLISECONDS,
     ),
     PrecisionPlexNumberDescription(
         key="awning_fabric_tighten_milliseconds",
@@ -110,6 +118,7 @@ NUMBERS: tuple[PrecisionPlexNumberDescription, ...] = (
         minimum=0.0,
         maximum=5000.0,
         step=50.0,
+        unit=UnitOfTime.MILLISECONDS,
     ),
     PrecisionPlexNumberDescription(
         key="awning_retract_end_threshold",
@@ -118,6 +127,7 @@ NUMBERS: tuple[PrecisionPlexNumberDescription, ...] = (
         minimum=5.0,
         maximum=25.0,
         step=0.25,
+        unit=(UnitOfElectricCurrent.AMPERE if UnitOfElectricCurrent else "A"),
     ),
     PrecisionPlexNumberDescription(
         key="bed_slide_open_seconds",
@@ -203,7 +213,6 @@ class PrecisionPlexTravelTimeNumber(NumberEntity, RestoreEntity):
 
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_mode = NumberMode.BOX
 
     def __init__(
@@ -221,6 +230,7 @@ class PrecisionPlexTravelTimeNumber(NumberEntity, RestoreEntity):
         self._attr_native_min_value = description.minimum
         self._attr_native_max_value = description.maximum
         self._attr_native_step = description.step
+        self._attr_native_unit_of_measurement = description.unit
         self._value = float(description.default)
 
     async def async_added_to_hass(self) -> None:
@@ -266,7 +276,8 @@ class PrecisionPlexTravelTimeNumber(NumberEntity, RestoreEntity):
         """Return diagnostic attributes."""
         return {
             "setting_key": self._plex_description.key,
-            "default_seconds": self._plex_description.default,
+            "default": self._plex_description.default,
+            "setting_unit": self._plex_description.unit,
         }
 
     async def async_set_native_value(self, value: float) -> None:

@@ -18,7 +18,8 @@
     },
     "error": {
       "pairing_mode_required": "Confirm that the Precision Plex controller is in Pair with Mobile mode before continuing.",
-      "pairing_failed": "Pairing failed. Put the wall panel back into Pair with Mobile mode and try again. Keep pressing Pair with Mobile whenever the button returns to its normal color."
+      "pairing_failed": "Pairing failed. Put the wall panel back into Pair with Mobile mode and try again. Keep pressing Pair with Mobile whenever the button returns to its normal color.",
+      "no_devices_found": "No Precision Plex Wireless TP devices were found. Verify the coach is powered, Home Assistant Bluetooth is working, the Precision app is closed, and press Pair with Mobile on the wall panel before trying again."
     },
     "abort": {
       "already_configured": "This Precision Plex controller is already configured.",

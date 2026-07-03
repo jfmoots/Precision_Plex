@@ -99,6 +99,27 @@ class PrecisionPlexStateCoordinator:
         self.last_rejected_packet_reason: str | None = None
         self.last_rejected_packet_source: str | None = None
         self.last_rejected_packet_hex: str | None = None
+        self.last_rejected_packet_type: str | None = None
+        self.last_rejected_packet_length: int | None = None
+        self.last_rejected_packet_sender: str | None = None
+        self.last_rejected_02aa_hex: str | None = None
+        self.last_rejected_02aa_length: int | None = None
+        self.last_rejected_02bb_hex: str | None = None
+        self.last_rejected_02bb_length: int | None = None
+        self.reject_reason_counts: dict[str, int] = {}
+        self.packet_length_counts: dict[str, int] = {}
+        self.packet_type_counts: dict[str, int] = {}
+        self.rejected_packet_log: list[dict[str, object | None]] = []
+        self.max_rejected_packet_log_entries: int = 100
+        self.last_rejected_packet_changed_byte_indices: list[int] = []
+        self.last_rejected_packet_changed_byte_count: int | None = None
+        self.last_rejected_packet_changed_bytes: list[dict[str, object]] = []
+        self.last_rejected_packet_seconds_since_last_good: float | None = None
+        self.last_rejected_packet_seconds_since_connect: float | None = None
+        self.rejected_packet_changed_byte_counts: dict[str, int] = {}
+        self.rejected_packet_changed_value_counts: dict[str, int] = {}
+        self.last_rejected_packet_variant: str | None = None
+        self.rejected_packet_variant_counts: dict[str, int] = {}
         self.pending_02bb_words: list[int] | None = None
         self.pending_02bb_confirmations: int = 0
         self.suppressed_02bb_glitch_count: int = 0
@@ -125,6 +146,7 @@ class PrecisionPlexStateCoordinator:
         self._listeners: list[Callable[[], None]] = []
         self._stopped = False
         self._write_lock = asyncio.Lock()
+        self._active_command_streams = 0
         self._start_unsub: Callable[[], None] | None = None
 
     async def async_start(self) -> None:
@@ -265,17 +287,101 @@ class PrecisionPlexStateCoordinator:
         return self.rejected_02aa_count + self.rejected_02bb_count
 
     @property
+    def packet_acceptance_percent(self) -> float | None:
+        """Return percentage of Precision Plex packets accepted."""
+        total = self.packets_received_count + self.packets_rejected_count
+        if total <= 0:
+            return None
+        return round((self.packets_received_count / total) * 100, 1)
+
+    @property
+    def packet_rejection_percent(self) -> float | None:
+        """Return percentage of Precision Plex packets rejected."""
+        total = self.packets_received_count + self.packets_rejected_count
+        if total <= 0:
+            return None
+        return round((self.packets_rejected_count / total) * 100, 1)
+
+    def reset_ble_diagnostics(self) -> None:
+        """Reset BLE packet health counters while keeping current telemetry state."""
+        self.rejected_02aa_count = 0
+        self.rejected_02bb_count = 0
+        self.received_02aa_count = 0
+        self.received_02bb_count = 0
+        self.suppressed_02bb_glitch_count = 0
+        self.ble_reconnect_count = 0
+        self.ble_disconnect_count = 0
+        self.hold_stream_recoveries = 0
+        self.hold_stream_interruption_count = 0
+        self.last_rejected_packet_reason = None
+        self.last_rejected_packet_source = None
+        self.last_rejected_packet_hex = None
+        self.last_rejected_packet_type = None
+        self.last_rejected_packet_length = None
+        self.last_rejected_packet_sender = None
+        self.last_rejected_02aa_hex = None
+        self.last_rejected_02aa_length = None
+        self.last_rejected_02bb_hex = None
+        self.last_rejected_02bb_length = None
+        self.reject_reason_counts = {}
+        self.packet_length_counts = {}
+        self.packet_type_counts = {}
+        self.rejected_packet_log = []
+        self.last_rejected_packet_changed_byte_indices = []
+        self.last_rejected_packet_changed_byte_count = None
+        self.last_rejected_packet_changed_bytes = []
+        self.last_rejected_packet_seconds_since_last_good = None
+        self.last_rejected_packet_seconds_since_connect = None
+        self.rejected_packet_changed_byte_counts = {}
+        self.rejected_packet_changed_value_counts = {}
+        self.last_rejected_packet_variant = None
+        self.rejected_packet_variant_counts = {}
+        self.last_hold_stream_error = None
+        if not self.hass.loop.is_closed():
+            self.hass.loop.call_soon_threadsafe(self._notify_listeners)
+
+    @property
     def last_valid_packet_age_seconds(self) -> int | None:
         """Return age of the last accepted packet in seconds."""
         if self.last_valid_packet_time is None:
             return None
         return max(0, int((dt_util.utcnow() - self.last_valid_packet_time).total_seconds()))
 
+    @property
+    def command_stream_active(self) -> bool:
+        """Return true while a long-running cover command stream owns BLE."""
+        return self._active_command_streams > 0
+
+    def _begin_command_stream(self, label: str) -> None:
+        """Mark BLE as owned by a long-running command stream."""
+        self._active_command_streams += 1
+        _LOGGER.info(
+            "Precision Plex BLE command stream started (%s); suspending monitor reconnects; active_streams=%s",
+            label,
+            self._active_command_streams,
+        )
+
+    def _end_command_stream(self, label: str) -> None:
+        """Release BLE ownership after a command stream ends."""
+        self._active_command_streams = max(0, self._active_command_streams - 1)
+        _LOGGER.info(
+            "Precision Plex BLE command stream ended (%s); monitor reconnects may resume; active_streams=%s",
+            label,
+            self._active_command_streams,
+        )
+
     async def _connection_loop(self) -> None:
         """Keep a read-only BLE subscription active."""
         try:
             while not self._stopped:
                 try:
+                    if self.command_stream_active:
+                        _LOGGER.debug("Precision Plex monitor waiting while command stream owns BLE")
+                        while self.command_stream_active and not self._stopped:
+                            await asyncio.sleep(0.25)
+                        if self._stopped:
+                            break
+
                     await self._connect_and_subscribe()
 
                     while (
@@ -296,6 +402,11 @@ class PrecisionPlexStateCoordinator:
                     _LOGGER.warning("Precision Plex monitor unexpected error: %r", err)
                     self._notify_listeners()
 
+                if self.command_stream_active:
+                    _LOGGER.info("Precision Plex monitor reconnect deferred while command stream owns BLE")
+                    while self.command_stream_active and not self._stopped:
+                        await asyncio.sleep(0.25)
+
                 await self._async_disconnect()
 
                 if not self._stopped:
@@ -308,9 +419,17 @@ class PrecisionPlexStateCoordinator:
 
     def _disconnected_callback(self, client: BleakClientWithServiceCache) -> None:
         """Handle BLE disconnection."""
-        self.available = False
         self.ble_disconnect_count += 1
         self.last_ble_disconnect_time = dt_util.utcnow()
+
+        if self.command_stream_active:
+            # A command stream may reconnect and continue writing immediately.
+            # Do not bounce cover entities unavailable mid-motion; let the
+            # stream report a write failure/timeout if recovery fails.
+            _LOGGER.info("Precision Plex BLE disconnected during active command stream; deferring monitor unavailable state")
+            return
+
+        self.available = False
 
         if self._stopped or self.hass.loop.is_closed():
             return
@@ -441,6 +560,27 @@ class PrecisionPlexStateCoordinator:
         if self._stopped:
             raise BleakError("Precision Plex coordinator is stopped")
 
+        self._begin_command_stream("hold_stream")
+        try:
+            await self._async_write_hold_stream_locked(
+                release_payload=release_payload,
+                hold_payload=hold_payload,
+                stop_event=stop_event,
+                interval_seconds=interval_seconds,
+                max_duration_seconds=max_duration_seconds,
+            )
+        finally:
+            self._end_command_stream("hold_stream")
+
+    async def _async_write_hold_stream_locked(
+        self,
+        release_payload: bytes,
+        hold_payload: bytes,
+        stop_event: asyncio.Event,
+        interval_seconds: float = 0.30,
+        max_duration_seconds: float = 30.0,
+    ) -> None:
+        """Send a hold stream while BLE ownership has already been marked."""
         async with self._write_lock:
             client = self._client
             control_char = None
@@ -637,24 +777,176 @@ class PrecisionPlexStateCoordinator:
         sender_handle = sender if isinstance(sender, int) else getattr(sender, "handle", None)
         self._apply_battery_state(bytes(data), "02AA notify", sender_handle)
 
+    def _increment_bounded_counter(self, counter: dict[str, int], key: str, max_keys: int = 100) -> None:
+        """Increment a small diagnostic counter without allowing unbounded growth."""
+        counter[key] = counter.get(key, 0) + 1
+        if len(counter) <= max_keys:
+            return
+
+        # Drop the least frequent key that is not the key we just updated. These
+        # are diagnostics only; bounded summaries are more important than exact
+        # long-tail accounting during extended field tests.
+        drop_candidates = [item for item in counter.items() if item[0] != key]
+        if not drop_candidates:
+            return
+        drop_key, _ = min(drop_candidates, key=lambda item: item[1])
+        counter.pop(drop_key, None)
+
+    def _classify_rejected_packet_variant(
+        self,
+        packet_type: str,
+        reason: str,
+        changed_byte_indices: list[int],
+        changed_bytes: list[dict[str, object]],
+    ) -> str:
+        """Classify rejected packets into stable buckets for field forensics."""
+        if not changed_byte_indices:
+            return f"{packet_type.lower()}_no_baseline_or_no_byte_delta"
+
+        index_key = ",".join(str(index) for index in changed_byte_indices)
+        value_parts: list[str] = []
+        for item in changed_bytes[:4]:
+            index = item.get("index")
+            expected = item.get("expected")
+            actual = item.get("actual")
+            value_parts.append(f"{index}:{expected}->{actual}")
+        value_key = "|".join(value_parts)
+
+        if packet_type == "02AA":
+            if reason.startswith("voltage_out_of_range"):
+                return f"02aa_voltage_variant_{value_key}"
+            if len(changed_byte_indices) == 1:
+                return f"02aa_single_byte_{index_key}_{value_key}"
+            if len(changed_byte_indices) == 2 and changed_byte_indices[1] - changed_byte_indices[0] == 5:
+                return f"02aa_pair_plus5_{index_key}_{value_key}"
+            if len(changed_byte_indices) == 2 and changed_byte_indices[1] - changed_byte_indices[0] == 6:
+                return f"02aa_pair_plus6_{index_key}_{value_key}"
+            return f"02aa_multi_byte_{index_key}_{value_key}"
+
+        if packet_type == "02BB":
+            return f"02bb_{reason}_{index_key}"
+
+        return f"{packet_type.lower()}_{reason}_{index_key}"
+
     def _reject_packet(self, packet_type: str, raw: bytes, source: str, reason: str, sender: int | None = None) -> None:
-        """Record and log a rejected BLE packet without updating user-facing state."""
+        """Record and log a rejected BLE packet without updating user-facing state.
+
+        The rolling forensic metadata is intentionally bounded. It compares a
+        rejected frame against the last accepted frame of the same type and
+        stores only summary fields plus the capped raw-packet buffer. That makes
+        long field runs safe while still giving enough detail to spot repeated
+        byte/nibble patterns.
+        """
+        now = dt_util.utcnow()
+
         if packet_type == "02AA":
             self.rejected_02aa_count += 1
+            self.last_rejected_02aa_hex = raw.hex(" ")
+            self.last_rejected_02aa_length = len(raw)
+            baseline = self.raw_battery_state
+            last_good_time = self.last_valid_02aa_time
         elif packet_type == "02BB":
             self.rejected_02bb_count += 1
+            self.last_rejected_02bb_hex = raw.hex(" ")
+            self.last_rejected_02bb_length = len(raw)
+            baseline = self.raw_state
+            last_good_time = self.last_valid_02bb_time
+        else:
+            baseline = None
+            last_good_time = self.last_valid_packet_time
+
+        raw_hex = raw.hex(" ")
+        raw_len = len(raw)
+        sender_text = f"0x{sender:04X}" if isinstance(sender, int) else None
+
+        changed_byte_indices: list[int] = []
+        changed_bytes: list[dict[str, object]] = []
+        if baseline is not None:
+            max_len = max(len(raw), len(baseline))
+            for index in range(max_len):
+                expected = baseline[index] if index < len(baseline) else None
+                actual = raw[index] if index < len(raw) else None
+                if expected != actual:
+                    changed_byte_indices.append(index)
+                    changed_bytes.append(
+                        {
+                            "index": index,
+                            "expected": f"0x{expected:02X}" if expected is not None else None,
+                            "actual": f"0x{actual:02X}" if actual is not None else None,
+                        }
+                    )
+
+        seconds_since_last_good = (
+            round((now - last_good_time).total_seconds(), 3)
+            if last_good_time is not None
+            else None
+        )
+        seconds_since_connect = (
+            round((now - self.last_ble_connect_time).total_seconds(), 3)
+            if self.last_ble_connect_time is not None
+            else None
+        )
+
+        changed_byte_key = ",".join(str(i) for i in changed_byte_indices) if changed_byte_indices else "none"
+        self._increment_bounded_counter(self.rejected_packet_changed_byte_counts, changed_byte_key)
+
+        changed_value_keys: list[str] = []
+        for item in changed_bytes[:16]:
+            value_key = f"{item.get('index')}:{item.get('expected')}->{item.get('actual')}"
+            changed_value_keys.append(value_key)
+            self._increment_bounded_counter(self.rejected_packet_changed_value_counts, value_key, max_keys=150)
+
+        variant = self._classify_rejected_packet_variant(packet_type, reason, changed_byte_indices, changed_bytes)
+        self._increment_bounded_counter(self.rejected_packet_variant_counts, variant, max_keys=100)
 
         self.last_rejected_packet_reason = reason
         self.last_rejected_packet_source = source
-        self.last_rejected_packet_hex = raw.hex(" ")
+        self.last_rejected_packet_hex = raw_hex
+        self.last_rejected_packet_type = packet_type
+        self.last_rejected_packet_length = raw_len
+        self.last_rejected_packet_sender = sender_text
+        self.last_rejected_packet_changed_byte_indices = changed_byte_indices
+        self.last_rejected_packet_changed_byte_count = len(changed_byte_indices)
+        self.last_rejected_packet_changed_bytes = changed_bytes[:16]
+        self.last_rejected_packet_seconds_since_last_good = seconds_since_last_good
+        self.last_rejected_packet_seconds_since_connect = seconds_since_connect
+        self.last_rejected_packet_variant = variant
+
+        self.reject_reason_counts[reason] = self.reject_reason_counts.get(reason, 0) + 1
+        self.packet_length_counts[f"{packet_type}_len_{raw_len}"] = self.packet_length_counts.get(f"{packet_type}_len_{raw_len}", 0) + 1
+        self.packet_type_counts[packet_type] = self.packet_type_counts.get(packet_type, 0) + 1
+
+        self.rejected_packet_log.append(
+            {
+                "timestamp": now.isoformat(),
+                "packet_type": packet_type,
+                "reason": reason,
+                "source": source,
+                "sender": sender_text,
+                "length": raw_len,
+                "seconds_since_last_good": seconds_since_last_good,
+                "seconds_since_connect": seconds_since_connect,
+                "changed_byte_indices": changed_byte_indices,
+                "changed_byte_count": len(changed_byte_indices),
+                "changed_bytes": changed_bytes[:16],
+                "changed_value_keys": changed_value_keys,
+                "variant": variant,
+                "hex": raw_hex,
+            }
+        )
+        if len(self.rejected_packet_log) > self.max_rejected_packet_log_entries:
+            self.rejected_packet_log = self.rejected_packet_log[-self.max_rejected_packet_log_entries :]
 
         _LOGGER.debug(
-            "Precision Plex rejected %s packet from %s sender=%s reason=%s raw_len=%s raw=%s",
+            "Precision Plex rejected %s packet from %s sender=%s reason=%s variant=%s raw_len=%s changed=%s seconds_since_last_good=%s raw=%s",
             packet_type,
             source,
             f"0x{sender:04X}" if isinstance(sender, int) else None,
             reason,
+            variant,
             len(raw),
+            changed_byte_indices,
+            seconds_since_last_good,
             raw.hex(" "),
         )
 
@@ -1171,6 +1463,11 @@ class PrecisionPlexStateCoordinator:
 
             self.raw_battery_state = raw
             self.available = True
+
+        self.received_02aa_count += 1
+        self.last_valid_02aa_time = dt_util.utcnow()
+        self.last_valid_packet_time = self.last_valid_02aa_time
+        self.last_valid_packet_source = source
 
         _LOGGER.debug(
             "Precision Plex 02AA decoded from %s sender=%s raw=%s coach_voltage=%s fresh_water_level=%s raw_fresh=%s grey_water_level=%s raw_grey=%s black_water_level=%s raw_black=%s lp_gas_level=%s raw_lp=%s generator_running=%s generator_runtime_hours=%s raw_generator_status=%s raw_generator_status_word=%s raw_generator_runtime_tenths=%s",

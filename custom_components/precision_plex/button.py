@@ -106,10 +106,50 @@ async def async_setup_entry(
     coordinator: PrecisionPlexStateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
+            PrecisionPlexResetBleDiagnosticsButton(coordinator, entry),
             *(PrecisionPlexGeneratorButton(coordinator, entry, key, cfg) for key, cfg in GENERATOR_BUTTONS.items()),
             *(PrecisionPlexCoverUtilityButton(coordinator, entry, description) for description in COVER_BUTTONS),
         ]
     )
+
+
+class PrecisionPlexResetBleDiagnosticsButton(ButtonEntity):
+    """Reset BLE diagnostic counters."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_name = "Reset BLE Diagnostics"
+    _attr_icon = "mdi:counter"
+
+    def __init__(self, coordinator: PrecisionPlexStateCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the reset diagnostics button."""
+        self.coordinator = coordinator
+        self.entry = entry
+        self._attr_unique_id = f"{coordinator.address}_reset_ble_diagnostics"
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
+            "name": "Precision Plex",
+            "manufacturer": "Precision Circuits",
+            "model": "Precision Plex Wireless TP Monitor",
+        }
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return diagnostic attributes."""
+        return {
+            "accepted_packets": self.coordinator.packets_received_count,
+            "rejected_packets": self.coordinator.packets_rejected_count,
+            "last_reject_reason": self.coordinator.last_rejected_packet_reason,
+        }
+
+    async def async_press(self) -> None:
+        """Reset BLE diagnostic counters."""
+        self.coordinator.reset_ble_diagnostics()
 
 
 class PrecisionPlexGeneratorButton(ButtonEntity):

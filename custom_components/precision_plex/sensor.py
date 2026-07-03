@@ -14,6 +14,39 @@ from .const import DOMAIN
 from .coordinator import PrecisionPlexStateCoordinator
 
 
+MAX_RECORDER_DICT_ENTRIES = 20
+MAX_RECORDER_LOG_ENTRIES = 5
+
+
+def _compact_count_dict(values, limit: int = MAX_RECORDER_DICT_ENTRIES) -> dict:
+    """Return a recorder-safe, top-N view of a counter-like dictionary."""
+    if not values:
+        return {}
+    items = list(dict(values).items())
+    try:
+        items.sort(key=lambda item: item[1], reverse=True)
+    except TypeError:
+        pass
+    return dict(items[:limit])
+
+
+def _compact_rejected_packet_entry(entry: dict) -> dict:
+    """Return a recorder-safe summary of a rejected packet entry."""
+    if not entry:
+        return {}
+    return {
+        "timestamp": entry.get("timestamp"),
+        "packet_type": entry.get("packet_type"),
+        "reason": entry.get("reason"),
+        "variant": entry.get("variant"),
+        "length": entry.get("length"),
+        "seconds_since_last_good": entry.get("seconds_since_last_good"),
+        "seconds_since_connect": entry.get("seconds_since_connect"),
+        "changed_byte_indices": entry.get("changed_byte_indices"),
+        "changed_byte_count": entry.get("changed_byte_count"),
+    }
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -44,6 +77,10 @@ async def async_setup_entry(
             PrecisionPlexBleRejected02AASensor(coordinator, entry),
             PrecisionPlexBleRejected02BBSensor(coordinator, entry),
             PrecisionPlexBleLastRejectReasonSensor(coordinator, entry),
+            PrecisionPlexBleLastRejectedPacketSensor(coordinator, entry),
+            PrecisionPlexBleLastRejectedPacketLengthSensor(coordinator, entry),
+            PrecisionPlexBlePacketRejectionPercentSensor(coordinator, entry),
+            PrecisionPlexBleRejectedPacketLogSensor(coordinator, entry),
             PrecisionPlexCommandStreamRecoveriesSensor(coordinator, entry),
             PrecisionPlexCommandStreamInterruptionsSensor(coordinator, entry),
             PrecisionPlexCommandStreamLastErrorSensor(coordinator, entry),
@@ -625,9 +662,30 @@ class PrecisionPlexBlePacketsRejectedSensor(PrecisionPlexDiagnosticCounterSensor
         return {
             "rejected_02aa": self.coordinator.rejected_02aa_count,
             "rejected_02bb": self.coordinator.rejected_02bb_count,
+            "acceptance_percent": self.coordinator.packet_acceptance_percent,
+            "rejection_percent": self.coordinator.packet_rejection_percent,
+            "last_rejected_packet_type": self.coordinator.last_rejected_packet_type,
             "last_rejected_packet_reason": self.coordinator.last_rejected_packet_reason,
             "last_rejected_packet_source": self.coordinator.last_rejected_packet_source,
+            "last_rejected_packet_length": self.coordinator.last_rejected_packet_length,
+            "last_rejected_packet_sender": self.coordinator.last_rejected_packet_sender,
             "last_rejected_packet_hex": self.coordinator.last_rejected_packet_hex,
+            "last_rejected_packet_changed_byte_indices": self.coordinator.last_rejected_packet_changed_byte_indices,
+            "last_rejected_packet_changed_byte_count": self.coordinator.last_rejected_packet_changed_byte_count,
+            "last_rejected_packet_changed_bytes": self.coordinator.last_rejected_packet_changed_bytes,
+            "last_rejected_packet_seconds_since_last_good": self.coordinator.last_rejected_packet_seconds_since_last_good,
+            "last_rejected_packet_seconds_since_connect": self.coordinator.last_rejected_packet_seconds_since_connect,
+            "last_rejected_packet_variant": self.coordinator.last_rejected_packet_variant,
+            "rejected_packet_variant_counts_top": _compact_count_dict(self.coordinator.rejected_packet_variant_counts),
+            "rejected_packet_changed_byte_counts": dict(self.coordinator.rejected_packet_changed_byte_counts),
+            "rejected_packet_changed_value_counts_top": _compact_count_dict(self.coordinator.rejected_packet_changed_value_counts),
+            "last_rejected_02aa_length": self.coordinator.last_rejected_02aa_length,
+            "last_rejected_02aa_hex": self.coordinator.last_rejected_02aa_hex,
+            "last_rejected_02bb_length": self.coordinator.last_rejected_02bb_length,
+            "last_rejected_02bb_hex": self.coordinator.last_rejected_02bb_hex,
+            "reject_reason_counts": dict(self.coordinator.reject_reason_counts),
+            "packet_length_counts": dict(self.coordinator.packet_length_counts),
+            "packet_type_counts": dict(self.coordinator.packet_type_counts),
             "suppressed_02bb_glitch_count": self.coordinator.suppressed_02bb_glitch_count,
         }
 
@@ -677,6 +735,141 @@ class PrecisionPlexBleLastRejectReasonSensor(PrecisionPlexBaseSensor):
         return {
             "source": self.coordinator.last_rejected_packet_source,
             "raw": self.coordinator.last_rejected_packet_hex,
+            "changed_byte_indices": self.coordinator.last_rejected_packet_changed_byte_indices,
+            "changed_byte_count": self.coordinator.last_rejected_packet_changed_byte_count,
+            "seconds_since_last_good": self.coordinator.last_rejected_packet_seconds_since_last_good,
+            "seconds_since_connect": self.coordinator.last_rejected_packet_seconds_since_connect,
+            "variant": self.coordinator.last_rejected_packet_variant,
+        }
+
+
+class PrecisionPlexBleLastRejectedPacketSensor(PrecisionPlexBaseSensor):
+    """Last rejected BLE packet as hex."""
+
+    _attr_name = "BLE Last Rejected Packet"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:code-braces"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_last_rejected_packet"
+
+    @property
+    def native_value(self):
+        return self.coordinator.last_rejected_packet_hex or "none"
+
+    @property
+    def available(self): return True
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "packet_type": self.coordinator.last_rejected_packet_type,
+            "length": self.coordinator.last_rejected_packet_length,
+            "reason": self.coordinator.last_rejected_packet_reason,
+            "source": self.coordinator.last_rejected_packet_source,
+            "sender": self.coordinator.last_rejected_packet_sender,
+            "changed_byte_indices": self.coordinator.last_rejected_packet_changed_byte_indices,
+            "changed_byte_count": self.coordinator.last_rejected_packet_changed_byte_count,
+            "changed_bytes": self.coordinator.last_rejected_packet_changed_bytes,
+            "seconds_since_last_good": self.coordinator.last_rejected_packet_seconds_since_last_good,
+            "seconds_since_connect": self.coordinator.last_rejected_packet_seconds_since_connect,
+            "variant": self.coordinator.last_rejected_packet_variant,
+            "variant_counts_top": _compact_count_dict(self.coordinator.rejected_packet_variant_counts),
+            "changed_value_counts_top": _compact_count_dict(self.coordinator.rejected_packet_changed_value_counts),
+            "last_02aa_hex": self.coordinator.last_rejected_02aa_hex,
+            "last_02bb_hex": self.coordinator.last_rejected_02bb_hex,
+        }
+
+
+class PrecisionPlexBleLastRejectedPacketLengthSensor(PrecisionPlexDiagnosticCounterSensor):
+    """Length of the last rejected BLE packet."""
+
+    _attr_name = "BLE Last Rejected Packet Length"
+    _attr_icon = "mdi:ruler"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_last_rejected_packet_length"
+
+    @property
+    def native_value(self):
+        return self.coordinator.last_rejected_packet_length
+
+    @property
+    def available(self): return self.coordinator.last_rejected_packet_length is not None
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "packet_type": self.coordinator.last_rejected_packet_type,
+            "reason": self.coordinator.last_rejected_packet_reason,
+            "packet_length_counts": dict(self.coordinator.packet_length_counts),
+        }
+
+
+class PrecisionPlexBlePacketRejectionPercentSensor(PrecisionPlexBaseSensor):
+    """Rejected BLE packet percentage."""
+
+    _attr_name = "BLE Packet Rejection Percent"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:percent"
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_packet_rejection_percent"
+
+    @property
+    def native_value(self):
+        return self.coordinator.packet_rejection_percent
+
+    @property
+    def available(self): return self.coordinator.packet_rejection_percent is not None
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "accepted": self.coordinator.packets_received_count,
+            "rejected": self.coordinator.packets_rejected_count,
+            "acceptance_percent": self.coordinator.packet_acceptance_percent,
+            "reject_reason_counts": dict(self.coordinator.reject_reason_counts),
+            "changed_byte_counts": dict(self.coordinator.rejected_packet_changed_byte_counts),
+        }
+
+
+class PrecisionPlexBleRejectedPacketLogSensor(PrecisionPlexBaseSensor):
+    """Rolling forensic log of recently rejected BLE packets."""
+
+    _attr_name = "BLE Rejected Packet Log"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:clipboard-text-clock-outline"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_ble_rejected_packet_log"
+
+    @property
+    def native_value(self):
+        count = len(getattr(self.coordinator, "rejected_packet_log", []) or [])
+        return count
+
+    @property
+    def available(self):
+        return True
+
+    @property
+    def extra_state_attributes(self):
+        log = list(getattr(self.coordinator, "rejected_packet_log", []) or [])
+        recent = log[-MAX_RECORDER_LOG_ENTRIES:]
+        return {
+            "stored_entries": len(log),
+            "max_entries": getattr(self.coordinator, "max_rejected_packet_log_entries", 100),
+            "recorder_entries_exposed": len(recent),
+            "oldest_entry_summary": _compact_rejected_packet_entry(log[0]) if log else None,
+            "newest_entry_summary": _compact_rejected_packet_entry(log[-1]) if log else None,
+            "recent_entries_compact": [_compact_rejected_packet_entry(entry) for entry in recent],
+            "full_log_available_in_diagnostics": True,
         }
 
 

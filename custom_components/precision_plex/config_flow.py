@@ -28,7 +28,6 @@ from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
 
 from .const import (
-    DEFAULT_TARGET_ADDRESS,
     DOMAIN,
     PAIRING_CHARACTERISTIC_UUID,
     PAIRING_INIT_PAYLOAD,
@@ -74,7 +73,15 @@ class PrecisionPlexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
         if not devices:
-            devices[DEFAULT_TARGET_ADDRESS] = f"Precision Plex {DEFAULT_TARGET_ADDRESS}"
+            _LOGGER.warning(
+                "Precision Plex setup found no Bluetooth advertisements matching service UUID %s or local name Precision*",
+                TARGET_SERVICE_UUID,
+            )
+            return self.async_show_form(
+                step_id="user",
+                data_schema=vol.Schema({}),
+                errors={"base": "no_devices_found"},
+            )
 
         if user_input is not None:
             self._address = user_input[CONF_ADDRESS]

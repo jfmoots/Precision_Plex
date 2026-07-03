@@ -45,7 +45,7 @@ HOLD_INTERVAL_SECONDS = 0.30
 AWNING_CURRENT_RUNNING_THRESHOLD_AMPS = 2.0
 AWNING_CURRENT_ZERO_THRESHOLD_AMPS = 1.0
 AWNING_CURRENT_ZERO_CONFIRM_SECONDS = 0.5
-AWNING_SMART_EXTRA_TIMEOUT_SECONDS = 45.0
+AWNING_SMART_EXTRA_TIMEOUT_SECONDS = 5.0
 
 SLIDE_ENDPOINT_SNAP_PERCENT = 2.0
 
@@ -611,6 +611,11 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
     async def _async_start_smart_awning_open(self) -> None:
         """Start smart awning extend with current-sensed arm lock and fabric flip."""
         async with self._command_lock:
+            _LOGGER.info(
+                "Precision Plex smart awning open requested; current=%.2fA position=%.1f%%",
+                self._read_awning_current() or 0.0,
+                self._estimated_position,
+            )
             await self._async_stop_hold_task()
 
             self._update_estimated_position()
@@ -626,6 +631,11 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
     async def _async_start_smart_awning_close(self) -> None:
         """Start smart awning retract and mark closed when factory cutout drops current."""
         async with self._command_lock:
+            _LOGGER.info(
+                "Precision Plex smart awning close requested; current=%.2fA position=%.1f%%",
+                self._read_awning_current() or 0.0,
+                self._estimated_position,
+            )
             await self._async_stop_hold_task()
 
             self._update_estimated_position()
@@ -660,10 +670,21 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             )
 
             ignore_seconds = self._runtime_setting("awning_current_ignore_seconds", 2.0)
-            threshold = self._runtime_setting("awning_arm_lock_threshold", 8.0)
+            threshold = self._runtime_setting("awning_arm_lock_threshold", 6.0)
             confirm_seconds = self._runtime_setting("awning_current_confirm_milliseconds", 300.0) / 1000.0
             overrun_seconds = self._runtime_setting("awning_extend_overrun_milliseconds", 100.0) / 1000.0
             flip_seconds = self._runtime_setting("awning_fabric_tighten_milliseconds", 4000.0) / 1000.0
+
+            _LOGGER.info(
+                "Precision Plex smart awning open runner started; threshold=%.2fA ignore=%.2fs confirm=%.2fs safety_max=%.2fs overrun=%.2fs flip=%.2fs current=%.2fA",
+                threshold,
+                ignore_seconds,
+                confirm_seconds,
+                max_duration,
+                overrun_seconds,
+                flip_seconds,
+                self._read_awning_current() or 0.0,
+            )
 
             detected_arm_lock = await self._async_wait_for_awning_current_above(
                 threshold=threshold,
@@ -681,18 +702,30 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     flip_seconds,
                 )
                 if overrun_seconds > 0:
+                    _LOGGER.info("Precision Plex smart awning open overrun started for %.2fs", overrun_seconds)
                     try:
                         await asyncio.wait_for(stop_event.wait(), timeout=overrun_seconds)
                     except asyncio.TimeoutError:
                         pass
+                    _LOGGER.info("Precision Plex smart awning open overrun complete; stopping extend stream")
 
 
             stop_event.set()
 
             if stream_task is not None:
                 await stream_task
+                _LOGGER.info("Precision Plex smart awning extend stream stopped; detected_arm_lock=%s current=%.2fA", detected_arm_lock, self._read_awning_current() or 0.0)
+
+            # Send one explicit extend release after the hold stream exits. This
+            # mirrors the manual Stop behavior and makes sure the Precision Plex
+            # controller is not left latched before the fabric-tighten retract.
+            try:
+                await self.coordinator.async_write_command(self._plex_description.out_release_payload)
+            except Exception as err:
+                _LOGGER.debug("Precision Plex smart awning open extra extend release failed safely: %r", err)
 
             if detected_arm_lock and flip_seconds > 0 and not self._stop_event_cancelled_externally():
+                _LOGGER.info("Precision Plex smart awning Carefree flip started for %.2fs", flip_seconds)
                 self._active_direction = "in"
                 self._start_tracking_motion("in")
                 flip_stop_event = asyncio.Event()
@@ -706,10 +739,14 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     )
                 finally:
                     flip_stop_event.set()
+                _LOGGER.info("Precision Plex smart awning Carefree flip complete; current=%.2fA", self._read_awning_current() or 0.0)
 
             if detected_arm_lock:
                 self._estimated_position = 100.0
                 self._position_source = "current_sense"
+                _LOGGER.info("Precision Plex smart awning open complete; position forced to 100%%")
+            else:
+                _LOGGER.warning("Precision Plex smart awning open ended without arm-lock detection; current=%.2fA", self._read_awning_current() or 0.0)
         except Exception as err:
             _LOGGER.warning(
                 "Precision Plex smart awning open ended safely after error: %r",
@@ -764,6 +801,14 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             confirm_seconds = self._runtime_setting("awning_current_confirm_milliseconds", 300.0) / 1000.0
             start_time = time.monotonic()
             above_since: float | None = None
+            _LOGGER.info(
+                "Precision Plex smart awning close runner started; threshold=%.2fA ignore=%.2fs confirm=%.2fs max=%.2fs current=%.2fA",
+                threshold,
+                ignore_seconds,
+                confirm_seconds,
+                max_duration,
+                self._read_awning_current() or 0.0,
+            )
 
             while not stop_event.is_set():
                 elapsed = time.monotonic() - start_time
@@ -855,30 +900,90 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         stop_event: asyncio.Event,
         max_wait_seconds: float,
     ) -> bool:
-        """Wait for awning motor current to exceed threshold for confirm time."""
+        """Wait for awning arm-lock current.
+
+        The ACS758 arm-lock signature can be very short.  Polling the current
+        sensor is not always enough because Home Assistant may publish a brief
+        current spike or ESPHome extend-event pulse between polling intervals.
+        Listen for state_changed events too, and latch the first qualifying
+        sample/event after the ignore window.
+        """
         start_time = time.monotonic()
-        above_since: float | None = None
+        latched = asyncio.Event()
+        current_state = self._find_awning_current_state()
+        current_entity_id = current_state.entity_id if current_state is not None else None
+        _LOGGER.info(
+            "Precision Plex smart awning waiting for arm-lock current; threshold=%.2fA ignore=%.2fs confirm=%.2fs current_entity=%s current=%.2fA",
+            threshold,
+            ignore_seconds,
+            confirm_seconds,
+            current_entity_id,
+            self._read_awning_current() or 0.0,
+        )
 
-        while not stop_event.is_set():
-            elapsed = time.monotonic() - start_time
-            if elapsed >= max_wait_seconds:
-                return False
+        @callback
+        def _state_changed(event) -> None:
+            if latched.is_set() or stop_event.is_set():
+                return
+            if (time.monotonic() - start_time) < ignore_seconds:
+                return
 
-            current = self._read_awning_current()
-            if elapsed >= ignore_seconds and current is not None and current >= threshold:
-                if above_since is None:
-                    above_since = time.monotonic()
-                elif (time.monotonic() - above_since) >= confirm_seconds:
+            entity_id = str(event.data.get("entity_id", ""))
+            new_state = event.data.get("new_state")
+            if new_state is None:
+                return
+
+            # ESPHome template binary sensor: this is the cleanest arm-lock
+            # pulse when it is available.  It may be too brief for polling, so
+            # latch it from the event bus.
+            if entity_id.endswith("_awning_extend_event") and new_state.state == "on":
+                _LOGGER.info("Precision Plex smart awning latched extend event from %s", entity_id)
+                latched.set()
+                return
+
+            # Also latch directly from the raw current sensor update.  This
+            # protects us if the binary event is renamed/disabled but current
+            # still crosses the configured threshold.
+            if (
+                entity_id == current_entity_id
+                or entity_id.endswith("_awning_motor_current")
+                or entity_id.endswith(".awning_motor_current")
+            ):
+                try:
+                    current = float(new_state.state)
+                except (TypeError, ValueError):
+                    return
+                if current >= threshold:
+                    _LOGGER.info(
+                        "Precision Plex smart awning latched current %.2fA from %s",
+                        current,
+                        entity_id,
+                    )
+                    latched.set()
+
+        unsubscribe = self.hass.bus.async_listen("state_changed", _state_changed)
+        try:
+            while not stop_event.is_set():
+                elapsed = time.monotonic() - start_time
+                if elapsed >= max_wait_seconds:
+                    return False
+
+                if latched.is_set():
                     return True
-            else:
-                above_since = None
 
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=0.1)
-            except asyncio.TimeoutError:
-                pass
+                current = self._read_awning_current()
+                if elapsed >= ignore_seconds and current is not None and current >= threshold:
+                    _LOGGER.info("Precision Plex smart awning latched polled current %.2fA", current)
+                    return True
 
-        return False
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=0.05)
+                except asyncio.TimeoutError:
+                    pass
+
+            return False
+        finally:
+            unsubscribe()
 
 
     async def _async_start_hold(
