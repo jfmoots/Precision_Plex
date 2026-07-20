@@ -17,6 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 
 LIN_SNAPSHOT_EVENT = "esphome.precision_plex_lin_snapshot"
 SNAPSHOT_MAX_AGE_SECONDS = 4.0
+HVAC_ZONE_GRACE_SECONDS = 30.0
 _VOLATILE_SNAPSHOT_KEYS = {
     "uptime_ms",
     "snapshot_sequence",
@@ -103,8 +104,13 @@ class PrecisionPlexLinTelemetry:
         self._unsub_state: Callable[[], None] | None = None
         self._unsub_snapshot: Callable[[], None] | None = None
         self._unsub_expiry: Callable[[], None] | None = None
+        self._unsub_hvac_expiry: dict[int, Callable[[], None] | None] = {
+            1: None,
+            2: None,
+        }
         self._snapshot: dict[str, Any] = {}
         self._snapshot_received: float | None = None
+        self._hvac_last_active: dict[int, float | None] = {1: None, 2: None}
         self.bridge_id: str | None = None
 
     @callback
@@ -130,10 +136,15 @@ class PrecisionPlexLinTelemetry:
         if self._unsub_expiry is not None:
             self._unsub_expiry()
             self._unsub_expiry = None
+        for zone in (1, 2):
+            if self._unsub_hvac_expiry[zone] is not None:
+                self._unsub_hvac_expiry[zone]()
+                self._unsub_hvac_expiry[zone] = None
         self.entity_ids.clear()
         self.device_id = None
         self._snapshot.clear()
         self._snapshot_received = None
+        self._hvac_last_active = {1: None, 2: None}
         self.bridge_id = None
 
     @callback
@@ -154,9 +165,27 @@ class PrecisionPlexLinTelemetry:
         )
         bridge_id = str(event.data.get("bridge_id") or "unknown")
         bridge_changed = bridge_id != self.bridge_id
+        if bridge_changed:
+            self._hvac_last_active = {1: None, 2: None}
+            for zone in (1, 2):
+                if self._unsub_hvac_expiry[zone] is not None:
+                    self._unsub_hvac_expiry[zone]()
+                    self._unsub_hvac_expiry[zone] = None
         self._snapshot = payload
-        self._snapshot_received = time.monotonic()
+        received = time.monotonic()
+        self._snapshot_received = received
         self.bridge_id = bridge_id
+        for zone in (1, 2):
+            if payload.get(f"hvac_zone_{zone}_active") is not True:
+                continue
+            self._hvac_last_active[zone] = received
+            if self._unsub_hvac_expiry[zone] is not None:
+                self._unsub_hvac_expiry[zone]()
+            self._unsub_hvac_expiry[zone] = async_call_later(
+                self.hass,
+                HVAC_ZONE_GRACE_SECONDS,
+                lambda _now, zone=zone: self._handle_hvac_zone_expired(zone),
+            )
         if self._unsub_expiry is not None:
             self._unsub_expiry()
         self._unsub_expiry = async_call_later(
@@ -180,6 +209,12 @@ class PrecisionPlexLinTelemetry:
     def _handle_snapshot_expired(self, _now: Any) -> None:
         """Refresh entity availability when the snapshot heartbeat stops."""
         self._unsub_expiry = None
+        self._listener()
+
+    @callback
+    def _handle_hvac_zone_expired(self, zone: int) -> None:
+        """Refresh one HVAC zone after its independent grace period expires."""
+        self._unsub_hvac_expiry[zone] = None
         self._listener()
 
     @callback
@@ -282,7 +317,13 @@ class PrecisionPlexLinTelemetry:
     def hvac_active(self, zone: int) -> bool:
         """Return whether one PID37 HVAC zone is fresh."""
         if self.snapshot_fresh:
-            return self._snapshot.get(f"hvac_zone_{zone}_active") is True
+            if self._snapshot.get(f"hvac_zone_{zone}_active") is True:
+                return True
+            last_active = self._hvac_last_active[zone]
+            return (
+                last_active is not None
+                and time.monotonic() - last_active <= HVAC_ZONE_GRACE_SECONDS
+            )
         keys = _HVAC_ZONE_1_KEYS if zone == 1 else _HVAC_ZONE_2_KEYS
         return any(self.state(key) is not None for key in keys)
 

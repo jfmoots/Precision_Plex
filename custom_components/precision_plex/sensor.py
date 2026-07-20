@@ -658,6 +658,7 @@ class PrecisionPlexDiagnosticCounterSensor(PrecisionPlexBaseSensor):
     """Base class for numeric BLE diagnostic counters."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:counter"
 
@@ -672,6 +673,7 @@ class PrecisionPlexBleLastValidPacketSensor(PrecisionPlexBaseSensor):
 
     _attr_name = "BLE Last Valid Packet"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:bluetooth-transfer"
 
@@ -706,6 +708,7 @@ class PrecisionPlexBlePacketAgeSensor(PrecisionPlexBaseSensor):
 
     _attr_name = "BLE Last Packet Age"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:timer-outline"
@@ -831,6 +834,7 @@ class PrecisionPlexBleLastRejectReasonSensor(PrecisionPlexBaseSensor):
 
     _attr_name = "BLE Last Reject Reason"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:alert-circle-outline"
 
     def __init__(self, coordinator, entry):
@@ -862,6 +866,7 @@ class PrecisionPlexBleLastRejectedPacketSensor(PrecisionPlexBaseSensor):
 
     _attr_name = "BLE Last Rejected Packet"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:code-braces"
 
     def __init__(self, coordinator, entry):
@@ -927,6 +932,7 @@ class PrecisionPlexBlePacketRejectionPercentSensor(PrecisionPlexBaseSensor):
 
     _attr_name = "BLE Packet Rejection Percent"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:percent"
     _attr_native_unit_of_measurement = PERCENTAGE
 
@@ -957,6 +963,7 @@ class PrecisionPlexBleRejectedPacketLogSensor(PrecisionPlexBaseSensor):
 
     _attr_name = "BLE Rejected Packet Log"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:clipboard-text-clock-outline"
 
     def __init__(self, coordinator, entry):
@@ -1010,6 +1017,7 @@ class PrecisionPlexCommandStreamInterruptionsSensor(PrecisionPlexDiagnosticCount
 class PrecisionPlexCommandStreamLastErrorSensor(PrecisionPlexBaseSensor):
     _attr_name = "BLE Command Stream Last Error"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:alert-outline"
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)

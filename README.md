@@ -8,6 +8,13 @@ This custom integration provides local control and monitoring of supported Preci
 
 ## Current Stable Release
 
+**v5.5.2**
+
+v5.5.2 keeps independently broadcast HVAC zones available through a 30-second
+per-zone grace period while preserving the four-second lost-bridge timeout. It
+also disables high-churn BLE packet-forensics entities by default on new
+installations to reduce recorder and Activity noise.
+
 **v5.5.1**
 
 v5.5.1 makes LIN updates change-driven end to end. Unchanged bridge heartbeats

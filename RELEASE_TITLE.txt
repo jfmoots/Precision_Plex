@@ -1,1 +1,1 @@
-Precision Plex v5.5.1 — Change-Driven LIN Updates
+Precision Plex v5.5.2 — Stable HVAC Telemetry and Quieter Diagnostics

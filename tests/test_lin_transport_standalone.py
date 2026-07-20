@@ -166,6 +166,68 @@ class LinTransportTest(unittest.TestCase):
         )
         self.assertIsNone(self.lin.value("ignition_on"))
 
+    def test_alternating_hvac_zones_remain_available_during_grace(self) -> None:
+        now = [100.0]
+        original_monotonic = self.module.time.monotonic
+        self.addCleanup(setattr, self.module.time, "monotonic", original_monotonic)
+        self.module.time.monotonic = lambda: now[0]
+
+        zone_1 = {
+            "schema": 1,
+            "hvac_zone_1_active": True,
+            "hvac_zone_2_active": False,
+            "hvac_zone_1_room_temp": 74,
+            "hvac_zone_2_room_temp": 75,
+        }
+        self.lin._handle_snapshot(
+            types.SimpleNamespace(data={"bridge_id": "test-lin", "payload": zone_1})
+        )
+        self.assertEqual(self.lin.value("hvac_zone_1_room_temp"), 74)
+
+        now[0] = 112.0
+        zone_2 = dict(
+            zone_1,
+            hvac_zone_1_active=False,
+            hvac_zone_2_active=True,
+        )
+        self.lin._handle_snapshot(
+            types.SimpleNamespace(data={"bridge_id": "test-lin", "payload": zone_2})
+        )
+        self.assertEqual(self.lin.value("hvac_zone_1_room_temp"), 74)
+        self.assertEqual(self.lin.value("hvac_zone_2_room_temp"), 75)
+
+        now[0] = 129.0
+        self.lin._handle_snapshot(
+            types.SimpleNamespace(data={"bridge_id": "test-lin", "payload": zone_2})
+        )
+        self.assertEqual(self.lin.value("hvac_zone_1_room_temp"), 74)
+
+        now[0] = 131.0
+        self.lin._handle_snapshot(
+            types.SimpleNamespace(data={"bridge_id": "test-lin", "payload": zone_2})
+        )
+        self.assertIsNone(self.lin.value("hvac_zone_1_room_temp"))
+        self.assertEqual(self.lin.value("hvac_zone_2_room_temp"), 75)
+
+    def test_hvac_grace_does_not_mask_lost_snapshot_heartbeat(self) -> None:
+        now = [100.0]
+        original_monotonic = self.module.time.monotonic
+        self.addCleanup(setattr, self.module.time, "monotonic", original_monotonic)
+        self.module.time.monotonic = lambda: now[0]
+        payload = {
+            "schema": 1,
+            "hvac_zone_1_active": True,
+            "hvac_zone_2_active": False,
+            "hvac_zone_1_room_temp": 74,
+        }
+        self.lin._handle_snapshot(
+            types.SimpleNamespace(data={"bridge_id": "test-lin", "payload": payload})
+        )
+        self.assertEqual(self.lin.value("hvac_zone_1_room_temp"), 74)
+
+        now[0] = 105.0
+        self.assertIsNone(self.lin.value("hvac_zone_1_room_temp"))
+
     def test_heartbeat_diagnostics_do_not_rewrite_all_entities(self) -> None:
         base = {
             "schema": 1,
