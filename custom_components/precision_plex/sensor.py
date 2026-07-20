@@ -67,6 +67,7 @@ async def async_setup_entry(
             PrecisionPlexPropaneHomeKitSensor(coordinator, entry),
             PrecisionPlexGeneratorRuntimeSensor(coordinator, entry),
             PrecisionPlexGeneratorStatusSensor(coordinator, entry),
+            PrecisionPlexTelemetryTransportSensor(coordinator, entry),
             PrecisionPlexAwningControlMethodSensor(coordinator, entry),
             PrecisionPlexBleLastValidPacketSensor(coordinator, entry),
             PrecisionPlexBlePacketAgeSensor(coordinator, entry),
@@ -145,12 +146,12 @@ class PrecisionPlexCoachBatterySensor(PrecisionPlexBaseSensor):
     @property
     def native_value(self) -> float | None:
         """Return coach battery voltage."""
-        return self.coordinator.coach_voltage
+        return self.coordinator.coach_voltage_value
 
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.coach_voltage is not None
+        return self.coordinator.coach_voltage_value is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
@@ -160,6 +161,7 @@ class PrecisionPlexCoachBatterySensor(PrecisionPlexBaseSensor):
         if raw is not None and len(raw) >= 2:
             raw_word = int.from_bytes(raw[0:2], "big")
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for("coach_voltage"),
             "source_handle": "0x002B",
             "source_characteristic": "02AA",
             "raw_tenths": raw_word,
@@ -189,18 +191,19 @@ class PrecisionPlexFreshWaterTankSensor(PrecisionPlexBaseSensor):
     @property
     def native_value(self) -> int | None:
         """Return Fresh Water tank percentage."""
-        return self.coordinator.fresh_water_level
+        return self.coordinator.fresh_water_level_value
 
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.fresh_water_level is not None
+        return self.coordinator.fresh_water_level_value is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
         """Return diagnostic attributes."""
         raw = self.coordinator.raw_battery_state
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for("fresh_water_level"),
             "source_handle": "0x002B",
             "source_characteristic": "02AA",
             "raw_fresh_nibble": (
@@ -231,18 +234,19 @@ class PrecisionPlexGreyWaterTankSensor(PrecisionPlexBaseSensor):
     @property
     def native_value(self) -> int | None:
         """Return Grey Water tank percentage."""
-        return self.coordinator.grey_water_level
+        return self.coordinator.grey_water_level_value
 
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.grey_water_level is not None
+        return self.coordinator.grey_water_level_value is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
         """Return diagnostic attributes."""
         raw = self.coordinator.raw_battery_state
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for("grey_water_level"),
             "source_handle": "0x002B",
             "source_characteristic": "02AA",
             "raw_grey_nibble": (
@@ -273,18 +277,19 @@ class PrecisionPlexBlackWaterTankSensor(PrecisionPlexBaseSensor):
     @property
     def native_value(self) -> int | None:
         """Return Black Water tank percentage."""
-        return self.coordinator.black_water_level
+        return self.coordinator.black_water_level_value
 
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.black_water_level is not None
+        return self.coordinator.black_water_level_value is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
         """Return diagnostic attributes."""
         raw = self.coordinator.raw_battery_state
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for("black_water_level"),
             "source_handle": "0x002B",
             "source_characteristic": "02AA",
             "raw_black_nibble": (
@@ -315,18 +320,19 @@ class PrecisionPlexLPGasTankSensor(PrecisionPlexBaseSensor):
     @property
     def native_value(self) -> int | None:
         """Return LP Gas tank percentage."""
-        return self.coordinator.lp_gas_level
+        return self.coordinator.lp_gas_level_value
 
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.lp_gas_level is not None
+        return self.coordinator.lp_gas_level_value is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
         """Return diagnostic attributes."""
         raw = self.coordinator.raw_battery_state
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for("lp_gas_level"),
             "source_handle": "0x002B",
             "source_characteristic": "02AA",
             "raw_lp_byte": (
@@ -408,23 +414,24 @@ class PrecisionPlexGeneratorStatusSensor(PrecisionPlexBaseSensor):
     @property
     def native_value(self) -> str | None:
         """Return decoded generator status text."""
-        return self.coordinator.generator_status
+        return self.coordinator.generator_status_value
 
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.generator_status is not None
+        return self.coordinator.generator_status_value is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | bool | None]:
         """Return diagnostic attributes."""
         raw = self.coordinator.raw_battery_state
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for("generator_status"),
             "source_handle": "0x002B",
             "source_characteristic": "02AA",
             "source_field": "bytes 6-7 generator status/transition word",
-            "generator_running": self.coordinator.generator_running,
-            "generator_status_key": self.coordinator.generator_status_key,
+            "generator_running": self.coordinator.generator_running_value,
+            "generator_status_key": self.coordinator.generator_status_key_value,
             "raw_generator_status": (
                 f"0x{self.coordinator.raw_generator_status:02X}"
                 if isinstance(self.coordinator.raw_generator_status, int)
@@ -437,6 +444,39 @@ class PrecisionPlexGeneratorStatusSensor(PrecisionPlexBaseSensor):
             ),
             "raw_02aa": raw.hex(" ") if raw is not None else None,
             "mapping": "0004=Stopped, 1004=Running, 00A0=AutoStart Accepted, 2004=Will Not Start, 6004=Performing Generator AutoStart, 7004=Performing Generator AutoStop",
+        }
+
+
+class PrecisionPlexTelemetryTransportSensor(PrecisionPlexBaseSensor):
+    """Show which transport currently supplies preferred coach telemetry."""
+
+    _attr_name = "Telemetry Transport"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:transit-connection-variant"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.address}_telemetry_transport"
+
+    @property
+    def native_value(self) -> str:
+        return self.coordinator.telemetry_transport
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "lin_bridge_device_id": self.coordinator.lin.device_id,
+            "lin_entity_count": len(self.coordinator.lin.entity_ids),
+            "lin_telemetry_active": self.coordinator.lin.active,
+            "lin_core_telemetry_active": self.coordinator.lin.core_active,
+            "lin_output_state_active": self.coordinator.lin.outputs_active,
+            "bluetooth_connected": self.coordinator.ble_connected,
+            "generator_runtime_source": "bluetooth",
+            "commands_source": "bluetooth",
         }
 
 class PrecisionPlexHomeKitLevelSensor(PrecisionPlexBaseSensor):
@@ -454,9 +494,9 @@ class PrecisionPlexFreshWaterHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{coordinator.address}_fresh_water_homekit"
     @property
-    def native_value(self): return self.coordinator.fresh_water_level
+    def native_value(self): return self.coordinator.fresh_water_level_value
     @property
-    def available(self): return self.coordinator.available and self.coordinator.fresh_water_level is not None
+    def available(self): return self.coordinator.fresh_water_level_value is not None
 
 class PrecisionPlexGreyWaterHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
     _attr_name = "Grey Tank"
@@ -464,9 +504,9 @@ class PrecisionPlexGreyWaterHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{coordinator.address}_grey_water_homekit"
     @property
-    def native_value(self): return self.coordinator.grey_water_level
+    def native_value(self): return self.coordinator.grey_water_level_value
     @property
-    def available(self): return self.coordinator.available and self.coordinator.grey_water_level is not None
+    def available(self): return self.coordinator.grey_water_level_value is not None
 
 class PrecisionPlexBlackWaterHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
     _attr_name = "Black Tank"
@@ -474,9 +514,9 @@ class PrecisionPlexBlackWaterHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{coordinator.address}_black_water_homekit"
     @property
-    def native_value(self): return self.coordinator.black_water_level
+    def native_value(self): return self.coordinator.black_water_level_value
     @property
-    def available(self): return self.coordinator.available and self.coordinator.black_water_level is not None
+    def available(self): return self.coordinator.black_water_level_value is not None
 
 class PrecisionPlexPropaneHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
     _attr_name = "Propane"
@@ -484,9 +524,9 @@ class PrecisionPlexPropaneHomeKitSensor(PrecisionPlexHomeKitLevelSensor):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{coordinator.address}_propane_homekit"
     @property
-    def native_value(self): return self.coordinator.lp_gas_level
+    def native_value(self): return self.coordinator.lp_gas_level_value
     @property
-    def available(self): return self.coordinator.available and self.coordinator.lp_gas_level is not None
+    def available(self): return self.coordinator.lp_gas_level_value is not None
 
 
 class PrecisionPlexAwningControlMethodSensor(PrecisionPlexBaseSensor):

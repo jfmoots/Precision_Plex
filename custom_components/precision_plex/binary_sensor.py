@@ -88,12 +88,13 @@ class PrecisionPlexStateBinarySensor(BinarySensorEntity):
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.state_word is not None
+        return self.coordinator.is_bit_on(self.bit, self.word_index) is not None
 
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for(self.key),
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
             "name": "Precision Plex",
@@ -155,17 +156,18 @@ class PrecisionPlexGeneratorRunningBinarySensor(BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         """Return decoded generator running state."""
-        return self.coordinator.generator_running
+        return self.coordinator.generator_running_value
 
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.generator_running is not None
+        return self.coordinator.generator_running_value is not None
 
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for("generator_running"),
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
             "name": "Precision Plex",
@@ -181,8 +183,8 @@ class PrecisionPlexGeneratorRunningBinarySensor(BinarySensorEntity):
             "source_handle": "0x002B",
             "source_characteristic": "02AA",
             "source_field": "byte 6 bit 0x10",
-            "generator_status": self.coordinator.generator_status,
-            "generator_status_key": self.coordinator.generator_status_key,
+            "generator_status": self.coordinator.generator_status_value,
+            "generator_status_key": self.coordinator.generator_status_key_value,
             "raw_generator_status": (
                 f"0x{self.coordinator.raw_generator_status:02X}"
                 if isinstance(self.coordinator.raw_generator_status, int)

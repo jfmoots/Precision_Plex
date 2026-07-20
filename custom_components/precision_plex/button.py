@@ -196,7 +196,7 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
         """Return whether the button is currently safe to press."""
         return (
             self.coordinator.available
-            and self.coordinator.generator_status_key in self.cfg["allowed_status_keys"]
+            and self.coordinator.generator_status_key_value in self.cfg["allowed_status_keys"]
         )
 
     @property
@@ -214,9 +214,10 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return diagnostic attributes."""
         return {
-            "generator_running": self.coordinator.generator_running,
-            "generator_status": self.coordinator.generator_status,
-            "generator_status_key": self.coordinator.generator_status_key,
+            "telemetry_source": self.coordinator.telemetry_source_for("generator_status"),
+            "generator_running": self.coordinator.generator_running_value,
+            "generator_status": self.coordinator.generator_status_value,
+            "generator_status_key": self.coordinator.generator_status_key_value,
             "safety_interlock": "status_aware",
             "allowed_status_keys": sorted(self.cfg["allowed_status_keys"]),
             "command_mode": "momentary_press_then_release",
@@ -227,7 +228,7 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
     async def async_press(self) -> None:
         """Send the momentary generator command when telemetry says it is safe."""
         async with self._command_lock:
-            if self.coordinator.generator_status_key not in self.cfg["allowed_status_keys"]:
+            if self.coordinator.generator_status_key_value not in self.cfg["allowed_status_keys"]:
                 _LOGGER.warning("%s", self.cfg["blocked_message"])
                 return
 

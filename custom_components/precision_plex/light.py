@@ -78,12 +78,13 @@ class PrecisionPlexAwningLight(LightEntity):
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.state_word is not None
+        return self.coordinator.available and self.is_on is not None
 
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for("awning_light"),
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
             "name": "Precision Plex",

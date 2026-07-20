@@ -28,6 +28,7 @@ from .const import (
     DEFAULT_PROFILE_ID,
     get_profile,
 )
+from .lin_transport import PrecisionPlexLinTelemetry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -148,6 +149,7 @@ class PrecisionPlexStateCoordinator:
         self._write_lock = asyncio.Lock()
         self._active_command_streams = 0
         self._start_unsub: Callable[[], None] | None = None
+        self.lin = PrecisionPlexLinTelemetry(hass, self._notify_listeners)
 
     async def async_start(self) -> None:
         """Start the BLE connection task.
@@ -158,6 +160,7 @@ class PrecisionPlexStateCoordinator:
         startup event, so start the coordinator immediately.
         """
         self._stopped = False
+        self.lin.start()
 
         hass_state = getattr(self.hass, "state", None)
         hass_is_running = bool(getattr(self.hass, "is_running", False))
@@ -200,6 +203,7 @@ class PrecisionPlexStateCoordinator:
     async def async_stop(self) -> None:
         """Stop coordinator, cancel the monitor task, and disconnect BLE cleanly."""
         self._stopped = True
+        self.lin.stop()
 
         if self._start_unsub is not None:
             self._start_unsub()
@@ -267,9 +271,80 @@ class PrecisionPlexStateCoordinator:
 
     def is_bit_on(self, bit: int, word_index: int = 0) -> bool | None:
         """Return True/False for a decoded 16-bit state bit."""
-        if not self.state_words or word_index >= len(self.state_words):
+        for key, description in self.profile["state_bits"].items():
+            if description.get("word_index", 0) != word_index or description["bit"] != bit:
+                continue
+            lin_value = self.lin.value(key)
+            if isinstance(lin_value, bool):
+                return lin_value
+            break
+        if not self.available or not self.state_words or word_index >= len(self.state_words):
             return None
         return bool(self.state_words[word_index] & bit)
+
+    def telemetry_source_for(self, key: str) -> str | None:
+        """Return the currently selected transport for one telemetry field."""
+        if self.lin.value(key) is not None:
+            return "lin"
+        if self.available:
+            return "bluetooth"
+        return None
+
+    @property
+    def telemetry_transport(self) -> str:
+        """Return the preferred live coach telemetry transport."""
+        if self.lin.active:
+            return "lin"
+        if self.available:
+            return "bluetooth"
+        return "unavailable"
+
+    @property
+    def coach_voltage_value(self) -> float | None:
+        value = self.lin.value("coach_voltage")
+        return float(value) if isinstance(value, (int, float)) else (self.coach_voltage if self.available else None)
+
+    @property
+    def fresh_water_level_value(self) -> int | None:
+        value = self.lin.value("fresh_water_level")
+        return round(value) if isinstance(value, (int, float)) else (self.fresh_water_level if self.available else None)
+
+    @property
+    def grey_water_level_value(self) -> int | None:
+        value = self.lin.value("grey_water_level")
+        return round(value) if isinstance(value, (int, float)) else (self.grey_water_level if self.available else None)
+
+    @property
+    def black_water_level_value(self) -> int | None:
+        value = self.lin.value("black_water_level")
+        return round(value) if isinstance(value, (int, float)) else (self.black_water_level if self.available else None)
+
+    @property
+    def lp_gas_level_value(self) -> int | None:
+        value = self.lin.value("lp_gas_level")
+        return round(value) if isinstance(value, (int, float)) else (self.lp_gas_level if self.available else None)
+
+    @property
+    def generator_running_value(self) -> bool | None:
+        value = self.lin.value("generator_running")
+        return value if isinstance(value, bool) else (self.generator_running if self.available else None)
+
+    @property
+    def generator_status_value(self) -> str | None:
+        value = self.lin.value("generator_status")
+        return str(value) if value is not None else (self.generator_status if self.available else None)
+
+    @property
+    def generator_status_key_value(self) -> str | None:
+        value = self.lin.value("generator_status")
+        if value is None:
+            return self.generator_status_key if self.available else None
+        return {
+            "idle_off": "stopped",
+            "running": "running",
+            "auto_starting": "auto_starting",
+            "auto_stopping": "auto_stopping",
+        }.get(str(value), str(value))
 
     @property
     def ble_connected(self) -> bool:

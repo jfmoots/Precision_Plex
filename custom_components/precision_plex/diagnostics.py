@@ -142,6 +142,7 @@ async def async_get_config_entry_diagnostics(
         },
         "coordinator": {
             "available": getattr(coordinator, "available", None),
+            "telemetry_transport": getattr(coordinator, "telemetry_transport", None),
             "stopped": getattr(coordinator, "_stopped", None),
             "address": getattr(coordinator, "address", None),
             "raw_state_02bb": _hex_bytes(getattr(coordinator, "raw_state", None)),
@@ -150,6 +151,7 @@ async def async_get_config_entry_diagnostics(
             "decoded_state_bits": _state_bit_diagnostics(coordinator),
             "raw_telemetry_02aa": _hex_bytes(getattr(coordinator, "raw_battery_state", None)),
             "coach_voltage": getattr(coordinator, "coach_voltage", None),
+            "preferred_coach_voltage": getattr(coordinator, "coach_voltage_value", None),
             "levels": {
                 "fresh_water_percent": getattr(coordinator, "fresh_water_level", None),
                 "fresh_water_raw": _hex_int(getattr(coordinator, "raw_fresh_level", None)),
@@ -168,6 +170,13 @@ async def async_get_config_entry_diagnostics(
                 "raw_status": _hex_int(getattr(coordinator, "raw_generator_status", None)),
                 "raw_status_word": _hex_int(getattr(coordinator, "raw_generator_status_word", None), 4),
                 "raw_runtime_tenths": getattr(coordinator, "raw_generator_runtime_tenths", None),
+            },
+            "lin": {
+                "active": getattr(getattr(coordinator, "lin", None), "active", False),
+                "core_active": getattr(getattr(coordinator, "lin", None), "core_active", False),
+                "outputs_active": getattr(getattr(coordinator, "lin", None), "outputs_active", False),
+                "bridge_device_id": getattr(getattr(coordinator, "lin", None), "device_id", None),
+                "mapped_entities": getattr(getattr(coordinator, "lin", None), "entity_ids", {}),
             },
             "packet_health": {
                 "rejected_02aa_count": getattr(coordinator, "rejected_02aa_count", None),

@@ -2,21 +2,23 @@
 
 Bring Precision Circuits Precision Plex controls and telemetry into Home Assistant.
 
-This custom integration provides local control and monitoring of supported Precision Plex-equipped motorhomes through the Precision Plex Wireless TP BLE module. It exposes coach systems as native Home Assistant entities for dashboards, automations, scripts, scenes, and HomeKit.
+This custom integration provides local control and monitoring of supported Precision Plex-equipped motorhomes. It prefers a discovered ESPHome Precision Plex LIN Analyzer for telemetry and automatically falls back to the Precision Plex Wireless TP BLE module. Commands remain on BLE in v5.4.0.
 
 ---
 
 ## Current Stable Release
 
-**v5.3.10**
+**v5.4.0**
 
-v5.3.7 is a BLE hardening and telemetry validation release based on the stable v5.3.6 feature set. It adds additional protection against one-sample BLE telemetry glitches and improves command-stream recovery for long-running cover commands.
+v5.4.0 introduces automatic LIN-preferred telemetry with field-by-field BLE fallback. It expects LIN Analyzer Build 013.0 or newer for freshness and directional motion signals.
 
 ---
 
 ## Supported Features
 
 - Precision Plex Wireless TP BLE communication
+- Automatic ESPHome LIN Analyzer discovery and LIN-preferred telemetry
+- Field-by-field Bluetooth telemetry fallback
 - Guided setup and pairing support
 - Native Home Assistant light, cover, switch, button, binary sensor, and sensor entities
 - Patio awning control
@@ -29,6 +31,10 @@ v5.3.7 is a BLE hardening and telemetry validation release based on the stable v
 - HomeKit-friendly entity exposure
 - Diagnostic attributes for raw Precision Plex telemetry
 - Custom integration branding/icons
+
+Generator cumulative runtime remains on Bluetooth because the current LIN
+decoder exposes only the tenths digit. All commands remain on Bluetooth while
+the LIN command path is investigated.
 
 ---
 

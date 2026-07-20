@@ -340,7 +340,13 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.state_word is not None
+        out_desc = STATE_BITS[self._plex_description.out_state_key]
+        in_desc = STATE_BITS[self._plex_description.in_state_key]
+        return (
+            self.coordinator.available
+            and self.coordinator.is_bit_on(out_desc["bit"], out_desc.get("word_index", 0)) is not None
+            and self.coordinator.is_bit_on(in_desc["bit"], in_desc.get("word_index", 0)) is not None
+        )
 
     @property
     def is_opening(self) -> bool:
@@ -379,6 +385,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         """Return diagnostic attributes."""
         self._update_estimated_position()
         attrs = {
+            "telemetry_source": self.coordinator.telemetry_source_for(
+                self._plex_description.out_state_key
+            ),
             "state_word": (
                 f"0x{self.coordinator.state_word:04X}"
                 if self.coordinator.state_word is not None
