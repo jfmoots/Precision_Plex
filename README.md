@@ -8,9 +8,14 @@ This custom integration provides local control and monitoring of supported Preci
 
 ## Current Stable Release
 
-**v5.5.0**
+**v5.5.1**
 
-v5.5.0 pairs with ESPHome Precision Plex LIN v0.6.0. The bridge now emits one
+v5.5.1 makes LIN updates change-driven end to end. Unchanged bridge heartbeats
+refresh availability without rewriting every Precision Plex entity, while
+meaningful decoded changes update immediately. It also adds confirmation-aware
+feedback for BLE-controlled toggle entities.
+
+v5.5.0 pairs with ESPHome Precision Plex LIN v0.6.0. The bridge emits one
 compact event snapshot while this integration owns decoded entities,
 availability, diagnostics, and transport selection. It adds LIN-only tank
 heater, AC/converter, ignition, and two-zone HVAC telemetry while retaining

@@ -92,7 +92,12 @@ class LinTransportTest(unittest.TestCase):
         registry = _Registry(self.module)
         registry_module.async_get = lambda _hass: registry
         self.hass = types.SimpleNamespace(states=_States(), bus=_Bus())
-        self.lin = self.module.PrecisionPlexLinTelemetry(self.hass, lambda: None)
+        self.notifications = 0
+
+        def notified() -> None:
+            self.notifications += 1
+
+        self.lin = self.module.PrecisionPlexLinTelemetry(self.hass, notified)
         self.lin.start()
 
     def _set(self, key: str, value: str) -> None:
@@ -160,6 +165,43 @@ class LinTransportTest(unittest.TestCase):
             )
         )
         self.assertIsNone(self.lin.value("ignition_on"))
+
+    def test_heartbeat_diagnostics_do_not_rewrite_all_entities(self) -> None:
+        base = {
+            "schema": 1,
+            "telemetry_active": True,
+            "outputs_active": True,
+            "power_active": True,
+            "hvac_zone_1_active": False,
+            "hvac_zone_2_active": False,
+            "awning_light": False,
+            "uptime_ms": 1000,
+            "snapshot_sequence": 1,
+            "snapshot_reason": "heartbeat",
+            "known_packets": 100,
+        }
+        before = self.notifications
+        self.lin._handle_snapshot(
+            types.SimpleNamespace(data={"bridge_id": "test-lin", "payload": base})
+        )
+        self.assertEqual(self.notifications, before + 1)
+
+        heartbeat = dict(base)
+        heartbeat.update(
+            uptime_ms=3000,
+            snapshot_sequence=2,
+            known_packets=300,
+        )
+        self.lin._handle_snapshot(
+            types.SimpleNamespace(data={"bridge_id": "test-lin", "payload": heartbeat})
+        )
+        self.assertEqual(self.notifications, before + 1)
+
+        changed = dict(heartbeat, awning_light=True, snapshot_reason="change")
+        self.lin._handle_snapshot(
+            types.SimpleNamespace(data={"bridge_id": "test-lin", "payload": changed})
+        )
+        self.assertEqual(self.notifications, before + 2)
 
 
 class DeviceInfoContractTest(unittest.TestCase):

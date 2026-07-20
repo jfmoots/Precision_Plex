@@ -17,6 +17,16 @@ _LOGGER = logging.getLogger(__name__)
 
 LIN_SNAPSHOT_EVENT = "esphome.precision_plex_lin_snapshot"
 SNAPSHOT_MAX_AGE_SECONDS = 4.0
+_VOLATILE_SNAPSHOT_KEYS = {
+    "uptime_ms",
+    "snapshot_sequence",
+    "snapshot_reason",
+    "packets_per_second",
+    "known_packets",
+    "unknown_packets",
+    "crc_errors",
+    "last_pid",
+}
 
 LIN_ENTITY_NAMES = {
     "health": "LIN Telemetry Active",
@@ -139,9 +149,14 @@ class PrecisionPlexLinTelemetry:
         if not isinstance(payload, dict) or payload.get("schema") != 1:
             return
 
+        meaningful_changed = self._meaningful_snapshot(payload) != self._meaningful_snapshot(
+            self._snapshot
+        )
+        bridge_id = str(event.data.get("bridge_id") or "unknown")
+        bridge_changed = bridge_id != self.bridge_id
         self._snapshot = payload
         self._snapshot_received = time.monotonic()
-        self.bridge_id = str(event.data.get("bridge_id") or "unknown")
+        self.bridge_id = bridge_id
         if self._unsub_expiry is not None:
             self._unsub_expiry()
         self._unsub_expiry = async_call_later(
@@ -149,7 +164,17 @@ class PrecisionPlexLinTelemetry:
             SNAPSHOT_MAX_AGE_SECONDS,
             self._handle_snapshot_expired,
         )
-        self._listener()
+        if meaningful_changed or bridge_changed:
+            self._listener()
+
+    @staticmethod
+    def _meaningful_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+        """Remove heartbeat-only diagnostics before deciding to update entities."""
+        return {
+            key: value
+            for key, value in payload.items()
+            if key not in _VOLATILE_SNAPSHOT_KEYS
+        }
 
     @callback
     def _handle_snapshot_expired(self, _now: Any) -> None:

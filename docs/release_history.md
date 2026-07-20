@@ -1,5 +1,17 @@
 # Release History
 
+## v5.5.1 - Change-Driven LIN Updates
+
+- Treats unchanged LIN snapshots as freshness heartbeats without rewriting all
+  integration entities.
+- Reacts immediately when a decoded telemetry value changes.
+- Added immediate requested-state feedback for awning light, water pump, and
+  water heater commands.
+- Holds the requested UI state while waiting for periodic PID32 confirmation.
+- Clears the pending state as soon as LIN confirms it.
+- Reverts to confirmed telemetry after ten seconds if the command does not
+  take effect, and clears optimism immediately when a BLE write fails.
+
 ## v5.5.0 - Integration-Owned LIN Telemetry
 
 - Added the versioned ESPHome LIN snapshot event transport.

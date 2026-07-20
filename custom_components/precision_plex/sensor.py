@@ -537,6 +537,8 @@ class PrecisionPlexTelemetryTransportSensor(PrecisionPlexBaseSensor):
             "lin_entity_count": len(self.coordinator.lin.entity_ids),
             "lin_event_snapshot_active": self.coordinator.lin.snapshot_fresh,
             "lin_firmware_version": snapshot.get("firmware_version"),
+            "lin_snapshot_sequence": snapshot.get("snapshot_sequence"),
+            "lin_snapshot_reason": snapshot.get("snapshot_reason"),
             "lin_bus_active": snapshot.get("bus_active"),
             "lin_packets_per_second": snapshot.get("packets_per_second"),
             "lin_known_packets": snapshot.get("known_packets"),

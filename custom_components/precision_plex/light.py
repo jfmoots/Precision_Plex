@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from homeassistant.components.light import ColorMode, LightEntity
@@ -20,6 +21,7 @@ from .coordinator import PrecisionPlexStateCoordinator
 
 
 TAP_DELAY_SECONDS = 0.25
+COMMAND_CONFIRMATION_TIMEOUT_SECONDS = 10.0
 
 
 async def async_setup_entry(
@@ -51,6 +53,8 @@ class PrecisionPlexAwningLight(LightEntity):
         self._attr_unique_id = f"{coordinator.address}_awning_light_control"
         self._remove_listener = None
         self._command_lock = asyncio.Lock()
+        self._pending_state: bool | None = None
+        self._pending_until: float = 0.0
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to coordinator updates."""
@@ -72,8 +76,25 @@ class PrecisionPlexAwningLight(LightEntity):
     @property
     def is_on(self) -> bool | None:
         """Return current awning light state from 02BB."""
+        confirmed = self._confirmed_is_on
+        if self._pending_state is not None:
+            if confirmed is self._pending_state:
+                self._clear_pending_state()
+            elif time.monotonic() < self._pending_until:
+                return self._pending_state
+            else:
+                self._clear_pending_state()
+        return confirmed
+
+    @property
+    def _confirmed_is_on(self) -> bool | None:
+        """Return the latest confirmed transport state, bypassing optimism."""
         bit = STATE_BITS["awning_light"]["bit"]
         return self.coordinator.is_bit_on(bit)
+
+    def _clear_pending_state(self) -> None:
+        self._pending_state = None
+        self._pending_until = 0.0
 
     @property
     def available(self) -> bool:
@@ -107,6 +128,10 @@ class PrecisionPlexAwningLight(LightEntity):
                 else None
             ),
             "command_mode": "momentary_release_then_press",
+            "command_confirmation_pending": self._pending_state is not None,
+            "command_requested_state": self._pending_state,
+            "confirmed_state": self._confirmed_is_on,
+            "command_confirmation_timeout_seconds": COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
             "command_channel": "03726f62-6f74-7061-6a61-6d61732e6361",
         }
 
@@ -126,7 +151,17 @@ class PrecisionPlexAwningLight(LightEntity):
             if current_state is desired_state:
                 return
 
-            await self.coordinator.async_write_command_sequence(
-                AWNING_LIGHT_TAP_SEQUENCE,
-                delay_seconds=TAP_DELAY_SECONDS,
+            self._pending_state = desired_state
+            self._pending_until = (
+                time.monotonic() + COMMAND_CONFIRMATION_TIMEOUT_SECONDS
             )
+            self.async_write_ha_state()
+            try:
+                await self.coordinator.async_write_command_sequence(
+                    AWNING_LIGHT_TAP_SEQUENCE,
+                    delay_seconds=TAP_DELAY_SECONDS,
+                )
+            except Exception:
+                self._clear_pending_state()
+                self.async_write_ha_state()
+                raise

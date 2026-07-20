@@ -1,1 +1,1 @@
-Precision Plex v5.5.0 — Integration-Owned LIN Telemetry
+Precision Plex v5.5.1 — Change-Driven LIN Updates
