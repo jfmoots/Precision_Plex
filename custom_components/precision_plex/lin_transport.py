@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import logging
+import json
+import time
 from collections.abc import Callable
 from typing import Any
 
 from homeassistant.const import EVENT_STATE_CHANGED, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_call_later
 
 _LOGGER = logging.getLogger(__name__)
+
+LIN_SNAPSHOT_EVENT = "esphome.precision_plex_lin_snapshot"
+SNAPSHOT_MAX_AGE_SECONDS = 4.0
 
 LIN_ENTITY_NAMES = {
     "health": "LIN Telemetry Active",
@@ -24,7 +30,10 @@ LIN_ENTITY_NAMES = {
     "generator_status": "LIN Generator State",
     "awning_light": "LIN Awning Light Status",
     "water_heater": "LIN Water Heater Status",
+    "tank_heater": "LIN Tank Heater Status",
     "water_pump": "LIN Water Pump Status",
+    "ac_converter_present": "LIN AC Converter Present",
+    "ignition_on": "LIN Ignition On",
     "awning_out": "LIN Patio Awning Extending",
     "awning_in": "LIN Patio Awning Retracting",
     "sofa_slide_out": "LIN Sofa Slide Extending",
@@ -33,6 +42,22 @@ LIN_ENTITY_NAMES = {
     "bed_slide_in": "LIN Bedroom Slide Retracting",
     "wardrobe_slide_out": "LIN Wardrobe Slide Extending",
     "wardrobe_slide_in": "LIN Wardrobe Slide Retracting",
+    "hvac_zone_1_room_temp": "HVAC Zone 1 Room Temperature",
+    "hvac_zone_1_setpoint": "HVAC Zone 1 Setpoint",
+    "hvac_zone_1_mode": "HVAC Zone 1 Mode",
+    "hvac_zone_1_request_phase": "HVAC Zone 1 Request Phase",
+    "hvac_zone_1_operating_state": "HVAC Zone 1 Operating State",
+    "hvac_zone_1_fan": "HVAC Zone 1 Fan",
+    "hvac_zone_1_compressor_lockout": "HVAC Zone 1 Compressor Lockout",
+    "hvac_zone_1_lockout_seconds": "HVAC Zone 1 PID37 Lockout Seconds",
+    "hvac_zone_2_room_temp": "HVAC Zone 2 Room Temperature",
+    "hvac_zone_2_setpoint": "HVAC Zone 2 Setpoint",
+    "hvac_zone_2_mode": "HVAC Zone 2 Mode",
+    "hvac_zone_2_request_phase": "HVAC Zone 2 Request Phase",
+    "hvac_zone_2_operating_state": "HVAC Zone 2 Operating State",
+    "hvac_zone_2_fan": "HVAC Zone 2 Fan",
+    "hvac_zone_2_compressor_lockout": "HVAC Zone 2 Compressor Lockout",
+    "hvac_zone_2_lockout_seconds": "HVAC Zone 2 PID37 Lockout Seconds",
 }
 
 _NAME_TO_KEY = {name: key for key, name in LIN_ENTITY_NAMES.items()}
@@ -41,6 +66,7 @@ _OUTPUT_KEYS = {
     "generator_running",
     "awning_light",
     "water_heater",
+    "tank_heater",
     "water_pump",
     "awning_out",
     "awning_in",
@@ -51,6 +77,9 @@ _OUTPUT_KEYS = {
     "wardrobe_slide_out",
     "wardrobe_slide_in",
 }
+_POWER_KEYS = {"ac_converter_present", "ignition_on"}
+_HVAC_ZONE_1_KEYS = {key for key in LIN_ENTITY_NAMES if key.startswith("hvac_zone_1_")}
+_HVAC_ZONE_2_KEYS = {key for key in LIN_ENTITY_NAMES if key.startswith("hvac_zone_2_")}
 
 
 class PrecisionPlexLinTelemetry:
@@ -62,6 +91,11 @@ class PrecisionPlexLinTelemetry:
         self.entity_ids: dict[str, str] = {}
         self.device_id: str | None = None
         self._unsub_state: Callable[[], None] | None = None
+        self._unsub_snapshot: Callable[[], None] | None = None
+        self._unsub_expiry: Callable[[], None] | None = None
+        self._snapshot: dict[str, Any] = {}
+        self._snapshot_received: float | None = None
+        self.bridge_id: str | None = None
 
     @callback
     def start(self) -> None:
@@ -70,6 +104,9 @@ class PrecisionPlexLinTelemetry:
         self._unsub_state = self.hass.bus.async_listen(
             EVENT_STATE_CHANGED, self._handle_state_changed
         )
+        self._unsub_snapshot = self.hass.bus.async_listen(
+            LIN_SNAPSHOT_EVENT, self._handle_snapshot
+        )
 
     @callback
     def stop(self) -> None:
@@ -77,8 +114,48 @@ class PrecisionPlexLinTelemetry:
         if self._unsub_state is not None:
             self._unsub_state()
             self._unsub_state = None
+        if self._unsub_snapshot is not None:
+            self._unsub_snapshot()
+            self._unsub_snapshot = None
+        if self._unsub_expiry is not None:
+            self._unsub_expiry()
+            self._unsub_expiry = None
         self.entity_ids.clear()
         self.device_id = None
+        self._snapshot.clear()
+        self._snapshot_received = None
+        self.bridge_id = None
+
+    @callback
+    def _handle_snapshot(self, event: Event) -> None:
+        """Accept a versioned snapshot emitted by the ESPHome LIN component."""
+        payload = event.data.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError):
+                _LOGGER.warning("Ignoring malformed Precision Plex LIN snapshot")
+                return
+        if not isinstance(payload, dict) or payload.get("schema") != 1:
+            return
+
+        self._snapshot = payload
+        self._snapshot_received = time.monotonic()
+        self.bridge_id = str(event.data.get("bridge_id") or "unknown")
+        if self._unsub_expiry is not None:
+            self._unsub_expiry()
+        self._unsub_expiry = async_call_later(
+            self.hass,
+            SNAPSHOT_MAX_AGE_SECONDS,
+            self._handle_snapshot_expired,
+        )
+        self._listener()
+
+    @callback
+    def _handle_snapshot_expired(self, _now: Any) -> None:
+        """Refresh entity availability when the snapshot heartbeat stops."""
+        self._unsub_expiry = None
+        self._listener()
 
     @callback
     def _discover(self) -> None:
@@ -146,28 +223,73 @@ class PrecisionPlexLinTelemetry:
     @property
     def active(self) -> bool:
         """Return whether the bridge reports any fresh preferred telemetry."""
-        return self.core_active or self.outputs_active
+        return (
+            self.core_active
+            or self.outputs_active
+            or self.power_active
+            or self.hvac_active(1)
+            or self.hvac_active(2)
+        )
 
     @property
     def core_active(self) -> bool:
         """Return whether battery/tank/generator telemetry is fresh."""
+        if self.snapshot_fresh:
+            return self._snapshot.get("telemetry_active") is True
         state = self.state("health")
         return state is not None and state.state == "on"
 
     @property
     def outputs_active(self) -> bool:
         """Return whether the PID32 output bitmap is fresh."""
+        if self.snapshot_fresh:
+            return self._snapshot.get("outputs_active") is True
         state = self.state("outputs_health")
         return state is not None and state.state == "on"
+
+    @property
+    def power_active(self) -> bool:
+        """Return whether PIDEC coach flags are fresh."""
+        if self.snapshot_fresh:
+            return self._snapshot.get("power_active") is True
+        return any(self.state(key) is not None for key in _POWER_KEYS)
+
+    def hvac_active(self, zone: int) -> bool:
+        """Return whether one PID37 HVAC zone is fresh."""
+        if self.snapshot_fresh:
+            return self._snapshot.get(f"hvac_zone_{zone}_active") is True
+        keys = _HVAC_ZONE_1_KEYS if zone == 1 else _HVAC_ZONE_2_KEYS
+        return any(self.state(key) is not None for key in keys)
+
+    @property
+    def snapshot_fresh(self) -> bool:
+        """Return whether the event heartbeat is still current."""
+        return (
+            self._snapshot_received is not None
+            and time.monotonic() - self._snapshot_received <= SNAPSHOT_MAX_AGE_SECONDS
+        )
+
+    @property
+    def snapshot(self) -> dict[str, Any]:
+        """Return the current snapshot for diagnostic attributes."""
+        return dict(self._snapshot) if self.snapshot_fresh else {}
 
     def value(self, key: str) -> Any | None:
         """Return a typed LIN value only while coach telemetry is fresh."""
         if key in _OUTPUT_KEYS:
             source_active = self.outputs_active
+        elif key in _POWER_KEYS:
+            source_active = self.power_active
+        elif key in _HVAC_ZONE_1_KEYS:
+            source_active = self.hvac_active(1)
+        elif key in _HVAC_ZONE_2_KEYS:
+            source_active = self.hvac_active(2)
         else:
             source_active = self.core_active
         if not source_active:
             return None
+        if self.snapshot_fresh and key in self._snapshot:
+            return self._snapshot[key]
         state = self.state(key)
         if state is None:
             return None

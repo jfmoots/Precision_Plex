@@ -2,25 +2,27 @@
 
 Bring Precision Circuits Precision Plex controls and telemetry into Home Assistant.
 
-This custom integration provides local control and monitoring of supported Precision Plex-equipped motorhomes. It prefers a discovered ESPHome Precision Plex LIN Analyzer for telemetry and automatically falls back to the Precision Plex Wireless TP BLE module. Commands remain on BLE in v5.4.0.
+This custom integration provides local control and monitoring of supported Precision Plex-equipped motorhomes. It prefers a discovered ESPHome Precision Plex LIN bridge for telemetry and automatically falls back to the Precision Plex Wireless TP BLE module. Commands remain on BLE in v5.5.0.
 
 ---
 
 ## Current Stable Release
 
-**v5.4.2**
+**v5.5.0**
 
-v5.4.2 pairs with LIN Analyzer Build 013.1 to provide flight-recorder-validated
-LIN movement telemetry for the bedroom slide, wardrobe slide, sofa, and patio
-awning. It retains the automatic LIN-preferred telemetry, field-by-field BLE
-fallback, and entity-registration correction from v5.4.1.
+v5.5.0 pairs with ESPHome Precision Plex LIN v0.6.0. The bridge now emits one
+compact event snapshot while this integration owns decoded entities,
+availability, diagnostics, and transport selection. It adds LIN-only tank
+heater, AC/converter, ignition, and two-zone HVAC telemetry while retaining
+field-by-field BLE fallback for shared fields.
 
 ---
 
 ## Supported Features
 
 - Precision Plex Wireless TP BLE communication
-- Automatic ESPHome LIN Analyzer discovery and LIN-preferred telemetry
+- Automatic ESPHome LIN event ingestion and LIN-preferred telemetry
+- LIN-only tank-heater, coach-power, ignition, and two-zone HVAC telemetry
 - Field-by-field Bluetooth telemetry fallback
 - Guided setup and pairing support
 - Native Home Assistant light, cover, switch, button, binary sensor, and sensor entities

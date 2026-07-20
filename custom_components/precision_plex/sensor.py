@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfElectricPotential, UnitOfTime
+from homeassistant.const import (
+    PERCENTAGE,
+    UnitOfElectricPotential,
+    UnitOfTemperature,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity import EntityCategory
@@ -85,8 +90,30 @@ async def async_setup_entry(
             PrecisionPlexCommandStreamRecoveriesSensor(coordinator, entry),
             PrecisionPlexCommandStreamInterruptionsSensor(coordinator, entry),
             PrecisionPlexCommandStreamLastErrorSensor(coordinator, entry),
+            *[
+                PrecisionPlexLinOnlySensor(coordinator, entry, description)
+                for description in LIN_ONLY_SENSOR_DESCRIPTIONS
+            ],
         ]
     )
+
+
+LIN_ONLY_SENSOR_DESCRIPTIONS = (
+    {"key": "hvac_zone_1_room_temp", "name": "HVAC Zone 1 Room Temperature", "temperature": True},
+    {"key": "hvac_zone_1_setpoint", "name": "HVAC Zone 1 Setpoint", "temperature": True},
+    {"key": "hvac_zone_1_mode", "name": "HVAC Zone 1 Mode"},
+    {"key": "hvac_zone_1_request_phase", "name": "HVAC Zone 1 Request Phase"},
+    {"key": "hvac_zone_1_operating_state", "name": "HVAC Zone 1 Operating State"},
+    {"key": "hvac_zone_1_fan", "name": "HVAC Zone 1 Fan"},
+    {"key": "hvac_zone_1_lockout_seconds", "name": "HVAC Zone 1 Compressor Lockout", "seconds": True},
+    {"key": "hvac_zone_2_room_temp", "name": "HVAC Zone 2 Room Temperature", "temperature": True},
+    {"key": "hvac_zone_2_setpoint", "name": "HVAC Zone 2 Setpoint", "temperature": True},
+    {"key": "hvac_zone_2_mode", "name": "HVAC Zone 2 Mode"},
+    {"key": "hvac_zone_2_request_phase", "name": "HVAC Zone 2 Request Phase"},
+    {"key": "hvac_zone_2_operating_state", "name": "HVAC Zone 2 Operating State"},
+    {"key": "hvac_zone_2_fan", "name": "HVAC Zone 2 Fan"},
+    {"key": "hvac_zone_2_lockout_seconds", "name": "HVAC Zone 2 Compressor Lockout", "seconds": True},
+)
 
 
 class PrecisionPlexBaseSensor(SensorEntity):
@@ -126,6 +153,41 @@ class PrecisionPlexBaseSensor(SensorEntity):
             "name": "Precision Plex",
             "manufacturer": "Precision Circuits",
             "model": "Precision Plex Wireless TP Monitor",
+        }
+
+
+class PrecisionPlexLinOnlySensor(PrecisionPlexBaseSensor):
+    """A sensor decoded from LIN with no BLE equivalent."""
+
+    def __init__(self, coordinator, entry, description) -> None:
+        super().__init__(coordinator, entry)
+        self.key = description["key"]
+        self._attr_name = description["name"]
+        self._attr_unique_id = f"{coordinator.address}_lin_{self.key}"
+        if description.get("temperature"):
+            self._attr_device_class = SensorDeviceClass.TEMPERATURE
+            self._attr_native_unit_of_measurement = UnitOfTemperature.FAHRENHEIT
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_suggested_display_precision = 0
+        elif description.get("seconds"):
+            self._attr_device_class = SensorDeviceClass.DURATION
+            self._attr_native_unit_of_measurement = UnitOfTime.SECONDS
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self):
+        return self.coordinator.lin.value(self.key)
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.lin.value(self.key) is not None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "telemetry_source": "lin",
+            "lin_bridge_id": self.coordinator.lin.bridge_id,
         }
 
 
@@ -468,9 +530,19 @@ class PrecisionPlexTelemetryTransportSensor(PrecisionPlexBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict:
+        snapshot = self.coordinator.lin.snapshot
         return {
             "lin_bridge_device_id": self.coordinator.lin.device_id,
+            "lin_bridge_id": self.coordinator.lin.bridge_id,
             "lin_entity_count": len(self.coordinator.lin.entity_ids),
+            "lin_event_snapshot_active": self.coordinator.lin.snapshot_fresh,
+            "lin_firmware_version": snapshot.get("firmware_version"),
+            "lin_bus_active": snapshot.get("bus_active"),
+            "lin_packets_per_second": snapshot.get("packets_per_second"),
+            "lin_known_packets": snapshot.get("known_packets"),
+            "lin_unknown_packets": snapshot.get("unknown_packets"),
+            "lin_crc_errors": snapshot.get("crc_errors"),
+            "lin_last_pid": snapshot.get("last_pid"),
             "lin_telemetry_active": self.coordinator.lin.active,
             "lin_core_telemetry_active": self.coordinator.lin.core_active,
             "lin_output_state_active": self.coordinator.lin.outputs_active,

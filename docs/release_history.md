@@ -1,5 +1,15 @@
 # Release History
 
+## v5.5.0 - Integration-Owned LIN Telemetry
+
+- Added the versioned ESPHome LIN snapshot event transport.
+- Moved decoded telemetry entities, availability, and freshness policy from
+  the ESPHome YAML into the Precision Plex integration.
+- Added tank-heater, AC/converter, ignition, and both PID37 HVAC zones as
+  integration-owned LIN-only entities.
+- Kept compatibility with the v0.5.x ESPHome entity transport during upgrades.
+- Kept generator cumulative runtime and every command on Bluetooth.
+
 ## v5.3.7 - BLE Hardening and Packet Validation
 
 - Added packet health diagnostics for rejected 02AA and 02BB frames.

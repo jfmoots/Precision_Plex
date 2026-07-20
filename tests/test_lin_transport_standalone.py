@@ -27,6 +27,8 @@ def _load_module():
     core.callback = lambda func: func
     helpers = types.ModuleType("homeassistant.helpers")
     entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
+    event_helper = types.ModuleType("homeassistant.helpers.event")
+    event_helper.async_call_later = lambda _hass, _delay, _callback: lambda: None
     helpers.entity_registry = entity_registry
     sys.modules.update(
         {
@@ -35,6 +37,7 @@ def _load_module():
             "homeassistant.core": core,
             "homeassistant.helpers": helpers,
             "homeassistant.helpers.entity_registry": entity_registry,
+            "homeassistant.helpers.event": event_helper,
         }
     )
     path = (
@@ -114,6 +117,49 @@ class LinTransportTest(unittest.TestCase):
         self._set("outputs_health", "on")
         self._set("water_pump", "off")
         self.assertIs(self.lin.value("water_pump"), False)
+
+    def test_event_snapshot_supplies_lin_only_and_core_values(self) -> None:
+        payload = {
+            "schema": 1,
+            "telemetry_active": True,
+            "outputs_active": True,
+            "power_active": True,
+            "hvac_zone_1_active": True,
+            "hvac_zone_2_active": False,
+            "coach_voltage": 13.6,
+            "tank_heater": False,
+            "ignition_on": True,
+            "hvac_zone_1_room_temp": 74,
+            "hvac_zone_1_mode": "cool",
+        }
+        self.lin._handle_snapshot(
+            types.SimpleNamespace(
+                data={"bridge_id": "test-lin", "payload": __import__("json").dumps(payload)}
+            )
+        )
+        self.assertEqual(self.lin.value("coach_voltage"), 13.6)
+        self.assertIs(self.lin.value("tank_heater"), False)
+        self.assertIs(self.lin.value("ignition_on"), True)
+        self.assertEqual(self.lin.value("hvac_zone_1_room_temp"), 74)
+        self.assertEqual(self.lin.bridge_id, "test-lin")
+
+    def test_inactive_snapshot_source_does_not_publish_stale_value(self) -> None:
+        self.lin._handle_snapshot(
+            types.SimpleNamespace(
+                data={
+                    "payload": {
+                        "schema": 1,
+                        "telemetry_active": False,
+                        "outputs_active": False,
+                        "power_active": False,
+                        "hvac_zone_1_active": False,
+                        "hvac_zone_2_active": False,
+                        "ignition_on": True,
+                    }
+                }
+            )
+        )
+        self.assertIsNone(self.lin.value("ignition_on"))
 
 
 class DeviceInfoContractTest(unittest.TestCase):

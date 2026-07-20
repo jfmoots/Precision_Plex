@@ -28,7 +28,80 @@ async def async_setup_entry(
     ]
     entities.append(PrecisionPlexGeneratorRunningBinarySensor(coordinator, entry))
     entities.append(PrecisionPlexBleConnectedBinarySensor(coordinator, entry))
+    entities.extend(
+        PrecisionPlexLinOnlyBinarySensor(coordinator, entry, key, name, device_class)
+        for key, name, device_class in (
+            ("tank_heater", "Tank Heater", BinarySensorDeviceClass.POWER),
+            ("ac_converter_present", "AC / Converter Present", BinarySensorDeviceClass.POWER),
+            ("ignition_on", "Ignition", BinarySensorDeviceClass.POWER),
+            (
+                "hvac_zone_1_compressor_lockout",
+                "HVAC Zone 1 Compressor Lockout",
+                BinarySensorDeviceClass.PROBLEM,
+            ),
+            (
+                "hvac_zone_2_compressor_lockout",
+                "HVAC Zone 2 Compressor Lockout",
+                BinarySensorDeviceClass.PROBLEM,
+            ),
+        )
+    )
     async_add_entities(entities)
+
+
+class PrecisionPlexLinOnlyBinarySensor(BinarySensorEntity):
+    """A read-only value that exists only on the LIN transport."""
+
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator, entry, key, name, device_class) -> None:
+        self.coordinator = coordinator
+        self.entry = entry
+        self.key = key
+        self._attr_name = name
+        self._attr_device_class = device_class
+        self._attr_unique_id = f"{coordinator.address}_lin_{key}"
+        self._remove_listener = None
+
+    async def async_added_to_hass(self) -> None:
+        self._remove_listener = self.coordinator.async_add_listener(
+            self._handle_coordinator_update
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._remove_listener is not None:
+            self._remove_listener()
+            self._remove_listener = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        value = self.coordinator.lin.value(self.key)
+        return value if isinstance(value, bool) else None
+
+    @property
+    def available(self) -> bool:
+        return isinstance(self.coordinator.lin.value(self.key), bool)
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.address)},
+            "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
+            "name": "Precision Plex",
+            "manufacturer": "Precision Circuits",
+            "model": "Precision Plex Wireless TP Monitor",
+        }
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "telemetry_source": "lin",
+            "lin_bridge_id": self.coordinator.lin.bridge_id,
+        }
 
 
 class PrecisionPlexStateBinarySensor(BinarySensorEntity):
