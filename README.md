@@ -8,9 +8,12 @@ This custom integration provides local control and monitoring of supported Preci
 
 ## Current Stable Release
 
-**v5.4.0**
+**v5.4.1**
 
-v5.4.0 introduces automatic LIN-preferred telemetry with field-by-field BLE fallback. It expects LIN Analyzer Build 013.0 or newer for freshness and directional motion signals.
+v5.4.1 corrects Home Assistant device registration for LIN-backed output-state
+entities. It retains the automatic LIN-preferred telemetry and field-by-field
+BLE fallback introduced in v5.4.0, and expects LIN Analyzer Build 013.0 or
+newer.
 
 ---
 

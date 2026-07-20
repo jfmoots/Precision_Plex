@@ -94,7 +94,6 @@ class PrecisionPlexStateBinarySensor(BinarySensorEntity):
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
         return {
-            "telemetry_source": self.coordinator.telemetry_source_for(self.key),
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
             "name": "Precision Plex",
@@ -106,6 +105,7 @@ class PrecisionPlexStateBinarySensor(BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return diagnostic attributes."""
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for(self.key),
             "state_word": (
                 f"0x{self.coordinator.state_word:04X}"
                 if self.coordinator.state_word is not None
@@ -167,7 +167,6 @@ class PrecisionPlexGeneratorRunningBinarySensor(BinarySensorEntity):
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
         return {
-            "telemetry_source": self.coordinator.telemetry_source_for("generator_running"),
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
             "name": "Precision Plex",
@@ -180,6 +179,7 @@ class PrecisionPlexGeneratorRunningBinarySensor(BinarySensorEntity):
         """Return diagnostic attributes."""
         raw = self.coordinator.raw_battery_state
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for("generator_running"),
             "source_handle": "0x002B",
             "source_characteristic": "02AA",
             "source_field": "byte 6 bit 0x10",

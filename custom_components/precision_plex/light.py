@@ -84,7 +84,6 @@ class PrecisionPlexAwningLight(LightEntity):
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
         return {
-            "telemetry_source": self.coordinator.telemetry_source_for("awning_light"),
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
             "name": "Precision Plex",
@@ -96,6 +95,7 @@ class PrecisionPlexAwningLight(LightEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return diagnostic attributes."""
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for("awning_light"),
             "state_word": (
                 f"0x{self.coordinator.state_word:04X}"
                 if self.coordinator.state_word is not None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import ast
 from pathlib import Path
 import sys
 import types
@@ -108,6 +109,56 @@ class LinTransportTest(unittest.TestCase):
         self.assertIs(self.lin.value("awning_out"), True)
         self._set("outputs_health", "off")
         self.assertIsNone(self.lin.value("awning_out"))
+
+    def test_output_off_is_a_valid_lin_value(self) -> None:
+        self._set("outputs_health", "on")
+        self._set("water_pump", "off")
+        self.assertIs(self.lin.value("water_pump"), False)
+
+
+class DeviceInfoContractTest(unittest.TestCase):
+    """Prevent entity attributes from leaking into HA device registry data."""
+
+    ALLOWED_DEVICE_INFO_KEYS = {
+        "configuration_url",
+        "connections",
+        "default_manufacturer",
+        "default_model",
+        "default_name",
+        "entry_type",
+        "hw_version",
+        "identifiers",
+        "manufacturer",
+        "model",
+        "name",
+        "serial_number",
+        "suggested_area",
+        "sw_version",
+        "via_device",
+        "via_device_id",
+    }
+
+    def test_all_literal_device_info_keys_are_valid(self) -> None:
+        component_dir = Path(__file__).parents[1] / "custom_components" / "precision_plex"
+        checked = 0
+        for path in component_dir.glob("*.py"):
+            tree = ast.parse(path.read_text(), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if node.name != "device_info":
+                    continue
+                for child in ast.walk(node):
+                    if not isinstance(child, ast.Return) or not isinstance(child.value, ast.Dict):
+                        continue
+                    keys = {
+                        key.value
+                        for key in child.value.keys
+                        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+                    }
+                    self.assertLessEqual(keys, self.ALLOWED_DEVICE_INFO_KEYS, path.name)
+                    checked += 1
+        self.assertGreater(checked, 0)
 
 
 if __name__ == "__main__":

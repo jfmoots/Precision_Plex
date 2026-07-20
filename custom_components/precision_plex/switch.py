@@ -89,7 +89,6 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
     @property
     def device_info(self) -> dict[str, Any]:
         return {
-            "telemetry_source": self.coordinator.telemetry_source_for(self.cfg["state_key"]),
             "identifiers": {(DOMAIN, self.coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, self.coordinator.address)},
             "name": "Precision Plex",
@@ -100,6 +99,7 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
+            "telemetry_source": self.coordinator.telemetry_source_for(self.cfg["state_key"]),
             "state_word": (
                 f"0x{self.coordinator.state_word:04X}"
                 if self.coordinator.state_word is not None
