@@ -5,14 +5,14 @@ systems.
 
 ## Current release
 
-**v5.5.5 - LIN Generator Runtime and Responsive Generator Commands**
+**v5.5.6 - Fast LIN Command Intent**
 
 - Prefers a discovered ESPHome Precision Plex LIN bridge for telemetry.
 - Retains Bluetooth as field-level fallback and for all commands.
 - Uses independent 30-second freshness grace periods for rotating LIN sources.
 - Keeps a four-second whole-bridge timeout for genuine communication loss.
-- Holds stateful HA commands immediately while slower PID32 confirmation is
-  pending, then reconciles without bouncing the UI.
+- Observes PID1F touchscreen and PID5E Wireless TP command intent immediately,
+  then reconciles it against authoritative PID32/02BB state.
 - Applies the same responsive state to covers, switches, lights, and their
   matching movement/status binary sensors.
 - Disables high-churn BLE forensic entities by default and migrates existing
@@ -44,11 +44,17 @@ Rotating PIDBA, PID32, PIDEC, and PID37 broadcasts retain their last valid state
 for 30 seconds while the bridge heartbeat remains healthy. If the event
 heartbeat stops, LIN telemetry becomes unavailable after four seconds.
 
-PID32 timing varies with the coach bus schedule. For
-commands initiated by Home Assistant, the integration publishes the requested
-state immediately and retains it until PID32 or BLE 02BB confirms the change.
-If neither transport confirms within 12 seconds, the entity safely returns to
-the latest authoritative telemetry value.
+PID1F and PID5E are the fast command-intent channels. Firmware v0.6.3 folds
+their request and accepted/active forms into one edge-driven event stream,
+ignores repeated hold traffic, and publishes a release only for the motion
+channel that was active. The integration uses that event to show toggles and
+movement immediately, regardless of whether the action began in Home
+Assistant, at the touchscreen, or through the Wireless TP path.
+
+PID32 remains authoritative confirmation. If it does not confirm an intent
+within 12 seconds, the temporary requested state expires back to telemetry.
+With older firmware that lacks intent events, Home Assistant commands retain
+the v5.5.5 local provisional-state fallback.
 
 ## Installation
 

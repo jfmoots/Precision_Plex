@@ -1,5 +1,13 @@
 # Release History
 
+## v5.5.6 - Fast PID1F/PID5E Command Intent
+
+- Normalizes touchscreen and Wireless TP command traffic into immediate
+  requested state for toggles and motion.
+- Deduplicates motion phases, holds, releases, and injected command echoes.
+- Keeps PID32/02BB authoritative and older firmware compatible.
+- Paired with ESPHome Precision Plex LIN v0.6.3.
+
 ## v5.5.5 - LIN Generator Runtime and Responsive Generator Commands
 
 - Added validated LIN-preferred generator runtime with Bluetooth fallback.

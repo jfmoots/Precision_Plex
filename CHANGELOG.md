@@ -3,6 +3,17 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.6 - Fast PID1F/PID5E Command Intent
+
+- Added one normalized command-intent consumer for PID1F and PID5E events.
+- Made wall-panel, Wireless TP, and Home Assistant toggle/motion requests appear
+  immediately while PID32 remains authoritative confirmation.
+- Deduplicated request/active motion phases, repeated holds, idle frames, and
+  injected PID5E echoes in the firmware/integration event contract.
+- Retained local optimistic feedback only as a compatibility fallback for
+  bridges older than v0.6.3.
+- Paired with ESPHome Precision Plex LIN v0.6.3.
+
 ## v5.5.5 - LIN Generator Runtime and Responsive Generator Commands
 
 - Prefers the complete validated PIDBA LIN generator runtime and retains BLE

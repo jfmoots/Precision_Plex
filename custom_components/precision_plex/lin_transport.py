@@ -358,6 +358,29 @@ class PrecisionPlexLinTelemetry:
         """Return the current snapshot for diagnostic attributes."""
         return dict(self._snapshot) if self.snapshot_fresh else {}
 
+    @property
+    def command_intent_capable(self) -> bool:
+        """Return whether the live bridge publishes normalized command intent."""
+        return self.snapshot_fresh and self._snapshot.get("command_intent_capable") is True
+
+    @property
+    def command_intent(self) -> dict[str, Any] | None:
+        """Return the latest normalized PID1F/PID5E command event."""
+        if not self.command_intent_capable:
+            return None
+        sequence = self._snapshot.get("command_sequence")
+        if not isinstance(sequence, int) or sequence <= 0:
+            return None
+        return {
+            "sequence": sequence,
+            "source": self._snapshot.get("command_source"),
+            "key": self._snapshot.get("command_key"),
+            "action": self._snapshot.get("command_action"),
+            "phase": self._snapshot.get("command_phase"),
+            "opcode": self._snapshot.get("command_opcode"),
+            "argument": self._snapshot.get("command_argument"),
+        }
+
     def value(self, key: str) -> Any | None:
         """Return a typed LIN value only while coach telemetry is fresh."""
         if key in _OUTPUT_KEYS:

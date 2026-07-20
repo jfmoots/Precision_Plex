@@ -51,9 +51,11 @@ Persistent BLE enables:
 
 The current integration uses a hybrid transport model. The ESPHome LIN bridge
 is preferred for decoded telemetry, while Bluetooth remains the command path
-and field-level telemetry fallback. A shared provisional-state layer provides
-immediate HA control feedback while slower PID32 output confirmation is
-pending.
+and field-level telemetry fallback. Firmware v0.6.3 also normalizes the fast
+PID1F touchscreen and PID5E Wireless TP command channels into one command-intent
+event stream. The integration overlays that requested state immediately while
+PID32/02BB remains authoritative confirmation. A local HA-only overlay is kept
+solely for compatibility with older bridges.
 
 The Wireless TP module appears to support only one active BLE connection at a time. Because of this, the Precision Circuits mobile app may not connect while Home Assistant is connected.
 

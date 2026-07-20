@@ -547,11 +547,17 @@ class PrecisionPlexTelemetryTransportSensor(PrecisionPlexBaseSensor):
             "lin_unknown_packets": snapshot.get("unknown_packets"),
             "lin_crc_errors": snapshot.get("crc_errors"),
             "lin_last_pid": snapshot.get("last_pid"),
+            "lin_command_intent_capable": self.coordinator.lin.command_intent_capable,
+            "lin_command_sequence": snapshot.get("command_sequence"),
+            "lin_command_source": snapshot.get("command_source"),
+            "lin_command_key": snapshot.get("command_key"),
+            "lin_command_action": snapshot.get("command_action"),
+            "lin_command_phase": snapshot.get("command_phase"),
             "lin_telemetry_active": self.coordinator.lin.active,
             "lin_core_telemetry_active": self.coordinator.lin.core_active,
             "lin_output_state_active": self.coordinator.lin.outputs_active,
             "bluetooth_connected": self.coordinator.ble_connected,
-            "generator_runtime_source": "bluetooth",
+            "generator_runtime_source": self.coordinator.generator_runtime_source,
             "commands_source": "bluetooth",
         }
 

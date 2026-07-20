@@ -1,1 +1,1 @@
-Precision Plex v5.5.5 — LIN Generator Runtime and Responsive Generator Commands
+Precision Plex v5.5.6 — Fast PID1F/PID5E Command Intent

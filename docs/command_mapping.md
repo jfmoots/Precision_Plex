@@ -148,15 +148,20 @@ The mobile app pattern is:
 The integration reproduces this pattern for cover entities.
 
 On the tested coach, the authoritative PID32 output bitmap uses a slower
-rotating schedule. Home Assistant commands therefore publish a
-provisional requested state immediately. The next matching PID32 or BLE 02BB
-value confirms that request without a visible state reversal. If confirmation
-does not arrive within 12 seconds, the integration returns to authoritative
-telemetry.
+rotating schedule. PID1F and PID5E carry command intent much sooner. Firmware
+v0.6.3 normalizes both channels and the integration publishes that requested
+state immediately. The next matching PID32 or BLE 02BB value confirms the
+request without a visible reversal. If confirmation does not arrive within 12
+seconds, the integration returns to authoritative telemetry.
 
 Captured LIN command behavior uses the lower movement opcode for the initial
 press/release phase and the same opcode plus `0x40` while actively held. The
 touchscreen channel returns to `3F 00` after release.
+
+Repeated hold frames do not produce repeated state transitions. PID1F and
+PID5E maintain separate active-motion context, so an idle `3F 00` is only a
+release when that same channel previously announced motion. PID5E `B0 02` and
+`B1 01` housekeeping frames are ignored.
 
 
 ## Sofa Slide Commands

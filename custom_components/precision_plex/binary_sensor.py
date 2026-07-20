@@ -79,7 +79,7 @@ class PrecisionPlexLinOnlyBinarySensor(BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
-        value = self.coordinator.lin.value(self.key)
+        value = self.coordinator.effective_lin_binary_value(self.key)
         return value if isinstance(value, bool) else None
 
     @property

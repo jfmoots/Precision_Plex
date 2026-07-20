@@ -46,6 +46,18 @@ STATE_FRAME_MAX_LEN = 20
 PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS = 12.0
 GENERATOR_COMMAND_FEEDBACK_TIMEOUT_SECONDS = 12.0
 
+_MOTION_OPPOSITES = {
+    "awning_out": "awning_in",
+    "awning_in": "awning_out",
+    "sofa_slide_out": "sofa_slide_in",
+    "sofa_slide_in": "sofa_slide_out",
+    "bed_slide_out": "bed_slide_in",
+    "bed_slide_in": "bed_slide_out",
+    "wardrobe_slide_out": "wardrobe_slide_in",
+    "wardrobe_slide_in": "wardrobe_slide_out",
+}
+_LIN_ONLY_COMMAND_INTENT_KEYS = {"tank_heater"}
+
 BLE_EXCEPTIONS = (
     BleakError,
     asyncio.TimeoutError,
@@ -158,7 +170,9 @@ class PrecisionPlexStateCoordinator:
         self._generator_command_confirmation_keys: set[str] = set()
         self._generator_command_baseline_key: str | None = None
         self._generator_command_expiry_unsub: Callable[[], None] | None = None
-        self.lin = PrecisionPlexLinTelemetry(hass, self._notify_listeners)
+        self._last_lin_command_identity: tuple[str | None, int] | None = None
+        self._last_lin_uptime_ms: int | None = None
+        self.lin = PrecisionPlexLinTelemetry(hass, self._handle_lin_update)
 
     async def async_start(self) -> None:
         """Start the BLE connection task.
@@ -280,6 +294,63 @@ class PrecisionPlexStateCoordinator:
         for listener in list(self._listeners):
             listener()
 
+    @callback
+    def _handle_lin_update(self) -> None:
+        """Apply one normalized bus command before publishing the LIN update."""
+        snapshot = self.lin.snapshot
+        uptime = snapshot.get("uptime_ms")
+        if isinstance(uptime, int):
+            if self._last_lin_uptime_ms is not None and uptime < self._last_lin_uptime_ms:
+                self._last_lin_command_identity = None
+            self._last_lin_uptime_ms = uptime
+
+        intent = self.lin.command_intent
+        if intent is not None:
+            identity = (self.lin.bridge_id, intent["sequence"])
+            if identity != self._last_lin_command_identity:
+                self._last_lin_command_identity = identity
+                self._apply_lin_command_intent(intent)
+        self._notify_listeners()
+
+    @callback
+    def _apply_lin_command_intent(self, intent: dict[str, object]) -> None:
+        """Overlay requested output state until PID32/02BB confirms it."""
+        key = intent.get("key")
+        action = intent.get("action")
+        if not isinstance(key, str) or (
+            key not in self.profile["state_bits"]
+            and key not in _LIN_ONLY_COMMAND_INTENT_KEYS
+        ):
+            return
+
+        if action == "toggle":
+            current = self._provisional_states.get(key)
+            if current is None:
+                description = self.profile["state_bits"].get(key)
+                if description is None:
+                    lin_value = self.lin.value(key)
+                    current = lin_value if isinstance(lin_value, bool) else None
+                else:
+                    current = self.confirmed_bit_on(
+                        description["bit"], description.get("word_index", 0)
+                    )
+            if current is None:
+                return
+            self.set_provisional_states({key: not current}, notify=False, force=True)
+            return
+
+        opposite = _MOTION_OPPOSITES.get(key)
+        if opposite is None:
+            return
+        if action == "motion_start":
+            self.set_provisional_states(
+                {key: True, opposite: False}, notify=False, force=True
+            )
+        elif action == "motion_stop":
+            self.set_provisional_states(
+                {key: False, opposite: False}, notify=False, force=True
+            )
+
     def is_bit_on(self, bit: int, word_index: int = 0) -> bool | None:
         """Return effective state, including an unconfirmed HA command."""
         key: str | None = None
@@ -324,26 +395,39 @@ class PrecisionPlexStateCoordinator:
         key: str,
         value: bool,
         timeout_seconds: float = PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
+        *,
+        notify: bool = True,
+        force: bool = False,
     ) -> None:
         """Publish a requested PID32 state until telemetry confirms or expires."""
-        self.set_provisional_states({key: value}, timeout_seconds)
+        self.set_provisional_states(
+            {key: value}, timeout_seconds, notify=notify, force=force
+        )
 
     @callback
     def set_provisional_states(
         self,
         values: dict[str, bool],
         timeout_seconds: float = PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
+        *,
+        notify: bool = True,
+        force: bool = False,
     ) -> None:
         """Publish several related requested states as one atomic update."""
+        if getattr(self.lin, "command_intent_capable", False) and not force:
+            return
         for key, value in values.items():
             description = self.profile["state_bits"].get(key)
-            if description is None:
+            if description is None and key not in _LIN_ONLY_COMMAND_INTENT_KEYS:
                 raise KeyError(f"Unknown Precision Plex state key: {key}")
-
-            confirmed = self.confirmed_bit_on(
-                description["bit"],
-                description.get("word_index", 0),
-            )
+            if description is None:
+                lin_value = self.lin.value(key)
+                confirmed = lin_value if isinstance(lin_value, bool) else None
+            else:
+                confirmed = self.confirmed_bit_on(
+                    description["bit"],
+                    description.get("word_index", 0),
+                )
             self.clear_provisional_state(key, notify=False)
             if confirmed is value:
                 continue
@@ -354,7 +438,8 @@ class PrecisionPlexStateCoordinator:
                 timeout_seconds,
                 lambda _now, key=key: self._handle_provisional_state_expired(key),
             )
-        self._notify_listeners()
+        if notify:
+            self._notify_listeners()
 
     @callback
     def _handle_provisional_state_expired(self, key: str) -> None:
@@ -393,6 +478,18 @@ class PrecisionPlexStateCoordinator:
     def provisional_state_for(self, key: str) -> bool | None:
         """Return the requested state awaiting PID32/02BB confirmation."""
         return self._provisional_states.get(key)
+
+    def effective_lin_binary_value(self, key: str) -> bool | None:
+        """Return a LIN-only binary value with command intent overlaid."""
+        lin_value = self.lin.value(key)
+        confirmed = lin_value if isinstance(lin_value, bool) else None
+        provisional = self._provisional_states.get(key)
+        if provisional is None:
+            return confirmed
+        if confirmed is provisional:
+            self.clear_provisional_state(key, notify=False)
+            return confirmed
+        return provisional
 
     def telemetry_source_for(self, key: str) -> str | None:
         """Return the currently selected transport for one telemetry field."""
