@@ -206,6 +206,9 @@ async def async_get_config_entry_diagnostics(
                 "rejected_coach_voltage_tenths": getattr(coordinator, "rejected_coach_voltage_tenths", None),
                 "rejected_coach_voltage_reason": getattr(coordinator, "rejected_coach_voltage_reason", None),
             },
+            "provisional_pid32_states": dict(
+                getattr(coordinator, "_provisional_states", {})
+            ),
             "ble": {
                 **_client_diagnostics(coordinator),
                 "reconnect_count": getattr(coordinator, "ble_reconnect_count", None),

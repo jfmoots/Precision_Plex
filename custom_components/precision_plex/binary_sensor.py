@@ -177,8 +177,13 @@ class PrecisionPlexStateBinarySensor(BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return diagnostic attributes."""
+        confirmed = self.coordinator.confirmed_bit_on(self.bit, self.word_index)
+        requested = self.coordinator.provisional_state_for(self.key)
         return {
             "telemetry_source": self.coordinator.telemetry_source_for(self.key),
+            "confirmed_state": confirmed,
+            "command_confirmation_pending": requested is not None,
+            "command_requested_state": requested,
             "state_word": (
                 f"0x{self.coordinator.state_word:04X}"
                 if self.coordinator.state_word is not None

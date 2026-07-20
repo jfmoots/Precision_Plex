@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
@@ -13,10 +12,10 @@ from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, STATE_BITS, WATER_PUMP_TAP, WATER_HEATER_TAP
-from .coordinator import PrecisionPlexStateCoordinator
-
-
-COMMAND_CONFIRMATION_TIMEOUT_SECONDS = 10.0
+from .coordinator import (
+    PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
+    PrecisionPlexStateCoordinator,
+)
 
 
 SWITCHES = {
@@ -66,8 +65,6 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
         self._attr_unique_id = f"{coordinator.address}_{key}_control"
         self._remove_listener = None
         self._command_lock = asyncio.Lock()
-        self._pending_state: bool | None = None
-        self._pending_until: float = 0.0
 
     async def async_added_to_hass(self) -> None:
         self._remove_listener = self.coordinator.async_add_listener(
@@ -85,24 +82,13 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
 
     @property
     def is_on(self) -> bool | None:
-        confirmed = self._confirmed_is_on
-        if self._pending_state is not None:
-            if confirmed is self._pending_state:
-                self._clear_pending_state()
-            elif time.monotonic() < self._pending_until:
-                return self._pending_state
-            else:
-                self._clear_pending_state()
-        return confirmed
+        bit = STATE_BITS[self.cfg["state_key"]]["bit"]
+        return self.coordinator.is_bit_on(bit)
 
     @property
     def _confirmed_is_on(self) -> bool | None:
         bit = STATE_BITS[self.cfg["state_key"]]["bit"]
-        return self.coordinator.is_bit_on(bit)
-
-    def _clear_pending_state(self) -> None:
-        self._pending_state = None
-        self._pending_until = 0.0
+        return self.coordinator.confirmed_bit_on(bit)
 
     @property
     def available(self) -> bool:
@@ -137,10 +123,10 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
             "last_rejected_packet_reason": self.coordinator.last_rejected_packet_reason,
             "pending_02bb_confirmations": self.coordinator.pending_02bb_confirmations,
             "command_mode": "state_aware_toggle",
-            "command_confirmation_pending": self._pending_state is not None,
-            "command_requested_state": self._pending_state,
+            "command_confirmation_pending": self.coordinator.provisional_state_for(self.cfg["state_key"]) is not None,
+            "command_requested_state": self.coordinator.provisional_state_for(self.cfg["state_key"]),
             "confirmed_state": self._confirmed_is_on,
-            "command_confirmation_timeout_seconds": COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
+            "command_confirmation_timeout_seconds": PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -153,14 +139,12 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
         async with self._command_lock:
             if self.is_on is desired_state:
                 return
-            self._pending_state = desired_state
-            self._pending_until = (
-                time.monotonic() + COMMAND_CONFIRMATION_TIMEOUT_SECONDS
+            self.coordinator.set_provisional_state(
+                self.cfg["state_key"],
+                desired_state,
             )
-            self.async_write_ha_state()
             try:
                 await self.coordinator.async_write_command(self.cfg["payload"])
             except Exception:
-                self._clear_pending_state()
-                self.async_write_ha_state()
+                self.coordinator.clear_provisional_state(self.cfg["state_key"])
                 raise

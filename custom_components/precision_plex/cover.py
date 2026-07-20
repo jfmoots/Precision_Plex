@@ -585,6 +585,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             # the BLE command path just because the user presses Stop after the
             # cover has already stopped.
             if controller_idle and no_ha_stream:
+                self._set_provisional_motion(None)
                 self._motion_direction = None
                 self._motion_started_at = None
                 self._last_position_update_at = None
@@ -593,6 +594,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 return
 
             await self._async_stop_hold_task()
+            self._set_provisional_motion(None)
 
             # Send both releases for safety. These are best-effort so a stale
             # BlueZ/Bleak connection cannot make the entity unavailable from
@@ -629,6 +631,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
             self._update_estimated_position()
             self._start_tracking_motion("out")
+            self._set_provisional_motion("out")
 
             self._stop_event = asyncio.Event()
             self._active_direction = "out"
@@ -649,6 +652,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
             self._update_estimated_position()
             self._start_tracking_motion("in")
+            self._set_provisional_motion("in")
 
             self._stop_event = asyncio.Event()
             self._active_direction = "in"
@@ -737,6 +741,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 _LOGGER.info("Precision Plex smart awning Carefree flip started for %.2fs", flip_seconds)
                 self._active_direction = "in"
                 self._start_tracking_motion("in")
+                self._set_provisional_motion("in")
                 flip_stop_event = asyncio.Event()
                 try:
                     await self.coordinator.async_write_hold_stream(
@@ -772,6 +777,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     _LOGGER.debug("Precision Plex smart awning stream cleanup failed safely: %r", err)
 
             self._motion_direction = None
+            self._set_provisional_motion(None)
             self._motion_started_at = None
             self._last_position_update_at = None
             self._active_direction = None
@@ -885,6 +891,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     _LOGGER.debug("Precision Plex smart awning close stream cleanup failed safely: %r", err)
 
             self._motion_direction = None
+            self._set_provisional_motion(None)
             self._motion_started_at = None
             self._last_position_update_at = None
             self._active_direction = None
@@ -1008,6 +1015,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
             self._update_estimated_position()
             self._start_tracking_motion(direction)
+            self._set_provisional_motion(direction)
 
             self._stop_event = asyncio.Event()
             self._active_direction = direction
@@ -1082,6 +1090,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     self._estimated_position = 0.0
 
             self._motion_direction = None
+            self._set_provisional_motion(None)
             self._motion_started_at = None
             self._last_position_update_at = None
             self._active_direction = None
@@ -1197,6 +1206,16 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 desc["bit"],
                 desc.get("word_index", 0),
             )
+        )
+
+
+    def _set_provisional_motion(self, direction: str | None) -> None:
+        """Expose an HA command immediately while slow PID32 catches up."""
+        self.coordinator.set_provisional_states(
+            {
+                self._plex_description.out_state_key: direction == "out",
+                self._plex_description.in_state_key: direction == "in",
+            }
         )
 
 

@@ -5,12 +5,16 @@ systems.
 
 ## Current release
 
-**v5.5.3 - Stable LIN Telemetry and Quieter Diagnostics**
+**v5.5.4 - Command-Responsive PID32 Controls**
 
 - Prefers a discovered ESPHome Precision Plex LIN bridge for telemetry.
 - Retains Bluetooth as field-level fallback and for all commands.
 - Uses independent 30-second freshness grace periods for rotating LIN sources.
 - Keeps a four-second whole-bridge timeout for genuine communication loss.
+- Holds stateful HA commands immediately while slower PID32 confirmation is
+  pending, then reconciles without bouncing the UI.
+- Applies the same responsive state to covers, switches, lights, and their
+  matching movement/status binary sensors.
 - Disables high-churn BLE forensic entities by default and migrates existing
   entries to the same quieter defaults.
 
@@ -38,6 +42,12 @@ integration falls back to Bluetooth where an equivalent value exists.
 Rotating PIDBA, PID32, PIDEC, and PID37 broadcasts retain their last valid state
 for 30 seconds while the bridge heartbeat remains healthy. If the event
 heartbeat stops, LIN telemetry becomes unavailable after four seconds.
+
+PID32 is scheduled approximately every five seconds on the tested coach. For
+commands initiated by Home Assistant, the integration publishes the requested
+state immediately and retains it until PID32 or BLE 02BB confirms the change.
+If neither transport confirms within 12 seconds, the entity safely returns to
+the latest authoritative telemetry value.
 
 ## Installation
 

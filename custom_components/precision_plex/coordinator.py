@@ -15,6 +15,7 @@ from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
 
@@ -42,6 +43,7 @@ COACH_VOLTAGE_MAX_TENTHS = 158
 COACH_VOLTAGE_MAX_UNCONFIRMED_JUMP_TENTHS = 10
 STATE_FRAME_MIN_LEN = 4
 STATE_FRAME_MAX_LEN = 20
+PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS = 12.0
 
 BLE_EXCEPTIONS = (
     BleakError,
@@ -149,6 +151,8 @@ class PrecisionPlexStateCoordinator:
         self._write_lock = asyncio.Lock()
         self._active_command_streams = 0
         self._start_unsub: Callable[[], None] | None = None
+        self._provisional_states: dict[str, bool] = {}
+        self._provisional_expiry_unsubs: dict[str, Callable[[], None]] = {}
         self.lin = PrecisionPlexLinTelemetry(hass, self._notify_listeners)
 
     async def async_start(self) -> None:
@@ -204,6 +208,7 @@ class PrecisionPlexStateCoordinator:
         """Stop coordinator, cancel the monitor task, and disconnect BLE cleanly."""
         self._stopped = True
         self.lin.stop()
+        self.clear_all_provisional_states(notify=False)
 
         if self._start_unsub is not None:
             self._start_unsub()
@@ -270,7 +275,32 @@ class PrecisionPlexStateCoordinator:
             listener()
 
     def is_bit_on(self, bit: int, word_index: int = 0) -> bool | None:
-        """Return True/False for a decoded 16-bit state bit."""
+        """Return effective state, including an unconfirmed HA command."""
+        key: str | None = None
+        for key, description in self.profile["state_bits"].items():
+            if description.get("word_index", 0) != word_index or description["bit"] != bit:
+                continue
+            break
+        else:
+            key = None
+
+        confirmed = self.confirmed_bit_on(bit, word_index)
+        if key is None:
+            return confirmed
+
+        provisional = self._provisional_states.get(key)
+        if provisional is None:
+            return confirmed
+
+        # The next matching PID32/02BB value confirms the command.  Clear the
+        # overlay but return the same value so entities do not bounce.
+        if confirmed is provisional:
+            self.clear_provisional_state(key, notify=False)
+            return confirmed
+        return provisional
+
+    def confirmed_bit_on(self, bit: int, word_index: int = 0) -> bool | None:
+        """Return transport-confirmed state without a provisional overlay."""
         for key, description in self.profile["state_bits"].items():
             if description.get("word_index", 0) != word_index or description["bit"] != bit:
                 continue
@@ -281,6 +311,82 @@ class PrecisionPlexStateCoordinator:
         if not self.available or not self.state_words or word_index >= len(self.state_words):
             return None
         return bool(self.state_words[word_index] & bit)
+
+    @callback
+    def set_provisional_state(
+        self,
+        key: str,
+        value: bool,
+        timeout_seconds: float = PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
+    ) -> None:
+        """Publish a requested PID32 state until telemetry confirms or expires."""
+        self.set_provisional_states({key: value}, timeout_seconds)
+
+    @callback
+    def set_provisional_states(
+        self,
+        values: dict[str, bool],
+        timeout_seconds: float = PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
+    ) -> None:
+        """Publish several related requested states as one atomic update."""
+        for key, value in values.items():
+            description = self.profile["state_bits"].get(key)
+            if description is None:
+                raise KeyError(f"Unknown Precision Plex state key: {key}")
+
+            confirmed = self.confirmed_bit_on(
+                description["bit"],
+                description.get("word_index", 0),
+            )
+            self.clear_provisional_state(key, notify=False)
+            if confirmed is value:
+                continue
+
+            self._provisional_states[key] = bool(value)
+            self._provisional_expiry_unsubs[key] = async_call_later(
+                self.hass,
+                timeout_seconds,
+                lambda _now, key=key: self._handle_provisional_state_expired(key),
+            )
+        self._notify_listeners()
+
+    @callback
+    def _handle_provisional_state_expired(self, key: str) -> None:
+        """Return an unconfirmed command to authoritative telemetry."""
+        self._provisional_expiry_unsubs.pop(key, None)
+        if self._provisional_states.pop(key, None) is not None:
+            _LOGGER.warning(
+                "Precision Plex command state for %s was not confirmed within %.1f seconds; reverting to telemetry",
+                key,
+                PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
+            )
+            self._notify_listeners()
+
+    @callback
+    def clear_provisional_state(self, key: str, notify: bool = True) -> None:
+        """Clear one pending command state."""
+        existed = key in self._provisional_states
+        self._provisional_states.pop(key, None)
+        unsub = self._provisional_expiry_unsubs.pop(key, None)
+        if unsub is not None:
+            unsub()
+        if existed and notify:
+            self._notify_listeners()
+
+    @callback
+    def clear_all_provisional_states(self, notify: bool = True) -> None:
+        """Clear all pending command states."""
+        existed = bool(self._provisional_states)
+        for unsub in self._provisional_expiry_unsubs.values():
+            unsub()
+        self._provisional_expiry_unsubs.clear()
+        self._provisional_states.clear()
+        if existed and notify:
+            self._notify_listeners()
+
+    def provisional_state_for(self, key: str) -> bool | None:
+        """Return the requested state awaiting PID32/02BB confirmation."""
+        return self._provisional_states.get(key)
 
     def telemetry_source_for(self, key: str) -> str | None:
         """Return the currently selected transport for one telemetry field."""

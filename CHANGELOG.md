@@ -3,6 +3,21 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.4 - Command-Responsive PID32 Controls
+
+- Added one shared provisional-state layer for every stateful Home Assistant
+  control backed by the slower PID32 output bitmap.
+- Made awning-light, water-pump, and water-heater controls update their control
+  entities and matching binary sensors immediately.
+- Made Bedroom, Wardrobe, and Sofa slide plus Patio Awning movement state react
+  immediately to Home Assistant open, close, jog, and stop commands.
+- Prevented stale PID32 frames from bouncing controls back to their previous
+  state while the next five-second PID32 broadcast is pending.
+- Reconciled provisional values automatically when PID32 or BLE 02BB confirms
+  the command, with a safe 12-second fallback when confirmation never arrives.
+- Retained the independent 30-second LIN source freshness grace periods; those
+  prevent unavailable flicker and are separate from command responsiveness.
+
 ## v5.5.3 - Stable LIN Telemetry and Quieter Diagnostics
 
 - Added independent 30-second freshness grace periods for core telemetry,
