@@ -5,7 +5,7 @@ systems.
 
 ## Current release
 
-**v5.5.4 - Command-Responsive PID32 Controls**
+**v5.5.5 - LIN Generator Runtime and Responsive Generator Commands**
 
 - Prefers a discovered ESPHome Precision Plex LIN bridge for telemetry.
 - Retains Bluetooth as field-level fallback and for all commands.
@@ -30,8 +30,9 @@ systems.
   and compressor-lockout telemetry from LIN
 - Optional slide quadrature and awning current-sensing enhancements
 
-Generator cumulative runtime and all commands remain on Bluetooth while the LIN
-command path is investigated.
+Generator cumulative runtime now prefers validated LIN PIDBA telemetry with
+Bluetooth fallback. All commands remain on Bluetooth while the LIN command path
+is investigated.
 
 ## Transport behavior
 
@@ -43,7 +44,7 @@ Rotating PIDBA, PID32, PIDEC, and PID37 broadcasts retain their last valid state
 for 30 seconds while the bridge heartbeat remains healthy. If the event
 heartbeat stops, LIN telemetry becomes unavailable after four seconds.
 
-PID32 is scheduled approximately every five seconds on the tested coach. For
+PID32 timing varies with the coach bus schedule. For
 commands initiated by Home Assistant, the integration publishes the requested
 state immediately and retains it until PID32 or BLE 02BB confirms the change.
 If neither transport confirms within 12 seconds, the entity safely returns to

@@ -46,6 +46,7 @@ LIN_ENTITY_NAMES = {
     "lp_gas_level": "LIN Propane",
     "generator_running": "LIN Generator Running",
     "generator_status": "LIN Generator State",
+    "generator_runtime_hours": "LIN Generator Runtime",
     "awning_light": "LIN Awning Light Status",
     "water_heater": "LIN Water Heater Status",
     "tank_heater": "LIN Tank Heater Status",

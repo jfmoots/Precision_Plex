@@ -32,24 +32,32 @@ GENERATOR_BUTTONS = {
         "name": "Generator Start",
         "sequence": GENERATOR_START_SEQUENCE,
         "allowed_status_keys": {"stopped", "will_not_start"},
+        "pending_status": "Start Requested",
+        "confirmation_keys": {"manual_starting", "running"},
         "blocked_message": "Generator start skipped because generator is not stopped or state is unknown",
     },
     "generator_stop": {
         "name": "Generator Stop",
         "sequence": GENERATOR_STOP_SEQUENCE,
         "allowed_status_keys": {"running"},
+        "pending_status": "Stop Requested",
+        "confirmation_keys": {"manual_stopping", "stopped"},
         "blocked_message": "Generator stop skipped because generator is not running or state is unknown",
     },
     "generator_auto_start": {
         "name": "Generator AutoStart",
         "sequence": GENERATOR_AUTO_START_SEQUENCE,
         "allowed_status_keys": {"stopped", "will_not_start"},
+        "pending_status": "AutoStart Requested",
+        "confirmation_keys": {"auto_start_accepted", "auto_starting", "running"},
         "blocked_message": "Generator AutoStart skipped because generator is not stopped or state is unknown",
     },
     "generator_auto_stop": {
         "name": "Generator AutoStop",
         "sequence": GENERATOR_AUTO_STOP_SEQUENCE,
         "allowed_status_keys": {"stopped", "running", "auto_start_accepted", "auto_starting"},
+        "pending_status": "AutoStop Requested",
+        "confirmation_keys": {"auto_stopping", "stopped"},
         "blocked_message": "Generator AutoStop skipped because generator is not running or state is unknown",
     },
 }
@@ -173,9 +181,11 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
         self._attr_unique_id = f"{coordinator.address}_{key}"
         self._command_lock = asyncio.Lock()
         self._remove_listener = None
+        self._last_available: bool | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to coordinator updates so availability refreshes after BLE connects."""
+        """Subscribe only for BLE command-path availability changes."""
+        self._last_available = self.available
         self._remove_listener = self.coordinator.async_add_listener(
             self._handle_coordinator_update
         )
@@ -188,16 +198,17 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Refresh entity state when BLE availability or generator status changes."""
+        """Avoid rewriting button state for unrelated telemetry changes."""
+        available = self.available
+        if available == self._last_available:
+            return
+        self._last_available = available
         self.async_write_ha_state()
 
     @property
     def available(self) -> bool:
-        """Return whether the button is currently safe to press."""
-        return (
-            self.coordinator.available
-            and self.coordinator.generator_status_key_value in self.cfg["allowed_status_keys"]
-        )
+        """Keep command buttons stable while the BLE command path is connected."""
+        return self.coordinator.ble_connected
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -214,10 +225,6 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return diagnostic attributes."""
         return {
-            "telemetry_source": self.coordinator.telemetry_source_for("generator_status"),
-            "generator_running": self.coordinator.generator_running_value,
-            "generator_status": self.coordinator.generator_status_value,
-            "generator_status_key": self.coordinator.generator_status_key_value,
             "safety_interlock": "status_aware",
             "allowed_status_keys": sorted(self.cfg["allowed_status_keys"]),
             "command_mode": "momentary_press_then_release",
@@ -232,10 +239,17 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
                 _LOGGER.warning("%s", self.cfg["blocked_message"])
                 return
 
-            await self.coordinator.async_write_command_sequence(
-                self.cfg["sequence"],
-                delay_seconds=0.25,
+            self.coordinator.set_generator_command_pending(
+                self.cfg["pending_status"], self.cfg["confirmation_keys"]
             )
+            try:
+                await self.coordinator.async_write_command_sequence(
+                    self.cfg["sequence"],
+                    delay_seconds=0.25,
+                )
+            except Exception:
+                self.coordinator.clear_generator_command_pending()
+                raise
 
 
 class PrecisionPlexCoverUtilityButton(ButtonEntity):

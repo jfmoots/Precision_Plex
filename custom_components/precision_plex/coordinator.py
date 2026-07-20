@@ -44,6 +44,7 @@ COACH_VOLTAGE_MAX_UNCONFIRMED_JUMP_TENTHS = 10
 STATE_FRAME_MIN_LEN = 4
 STATE_FRAME_MAX_LEN = 20
 PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS = 12.0
+GENERATOR_COMMAND_FEEDBACK_TIMEOUT_SECONDS = 12.0
 
 BLE_EXCEPTIONS = (
     BleakError,
@@ -153,6 +154,10 @@ class PrecisionPlexStateCoordinator:
         self._start_unsub: Callable[[], None] | None = None
         self._provisional_states: dict[str, bool] = {}
         self._provisional_expiry_unsubs: dict[str, Callable[[], None]] = {}
+        self._generator_command_pending_status: str | None = None
+        self._generator_command_confirmation_keys: set[str] = set()
+        self._generator_command_baseline_key: str | None = None
+        self._generator_command_expiry_unsub: Callable[[], None] | None = None
         self.lin = PrecisionPlexLinTelemetry(hass, self._notify_listeners)
 
     async def async_start(self) -> None:
@@ -209,6 +214,7 @@ class PrecisionPlexStateCoordinator:
         self._stopped = True
         self.lin.stop()
         self.clear_all_provisional_states(notify=False)
+        self.clear_generator_command_pending(notify=False)
 
         if self._start_unsub is not None:
             self._start_unsub()
@@ -396,6 +402,49 @@ class PrecisionPlexStateCoordinator:
             return "bluetooth"
         return None
 
+    @callback
+    def set_generator_command_pending(
+        self, status: str, confirmation_keys: set[str]
+    ) -> None:
+        """Publish command acknowledgement while waiting for generator telemetry."""
+        self.clear_generator_command_pending(notify=False)
+        self._generator_command_pending_status = status
+        self._generator_command_confirmation_keys = set(confirmation_keys)
+        self._generator_command_baseline_key = self.generator_status_key_value
+        self._generator_command_expiry_unsub = async_call_later(
+            self.hass,
+            GENERATOR_COMMAND_FEEDBACK_TIMEOUT_SECONDS,
+            self._handle_generator_command_pending_expired,
+        )
+        self._notify_listeners()
+
+    @callback
+    def _handle_generator_command_pending_expired(self, _now) -> None:
+        """Return the generator status sensor to authoritative telemetry."""
+        self._generator_command_expiry_unsub = None
+        self._generator_command_pending_status = None
+        self._generator_command_confirmation_keys.clear()
+        self._generator_command_baseline_key = None
+        self._notify_listeners()
+
+    @callback
+    def clear_generator_command_pending(self, notify: bool = True) -> None:
+        """Clear a pending generator command acknowledgement."""
+        existed = self._generator_command_pending_status is not None
+        self._generator_command_pending_status = None
+        self._generator_command_confirmation_keys.clear()
+        self._generator_command_baseline_key = None
+        if self._generator_command_expiry_unsub is not None:
+            self._generator_command_expiry_unsub()
+            self._generator_command_expiry_unsub = None
+        if existed and notify:
+            self._notify_listeners()
+
+    @property
+    def generator_command_pending_status(self) -> str | None:
+        """Return an unconfirmed generator command acknowledgement."""
+        return self._generator_command_pending_status
+
     @property
     def telemetry_transport(self) -> str:
         """Return the preferred live coach telemetry transport."""
@@ -436,7 +485,50 @@ class PrecisionPlexStateCoordinator:
         return value if isinstance(value, bool) else (self.generator_running if self.available else None)
 
     @property
+    def generator_runtime_hours_value(self) -> float | None:
+        """Prefer validated LIN generator runtime, with BLE fallback."""
+        value = self.lin.value("generator_runtime_hours")
+        if isinstance(value, (int, float)):
+            lin_hours = float(value)
+            # Match the existing BLE guard until the PIDBA BCD counter has been
+            # observed through a whole-hour rollover in this coach.
+            if 0.0 <= lin_hours <= GENERATOR_RUNTIME_MAX_PLAUSIBLE_TENTHS / 10:
+                if (
+                    self.generator_runtime_hours is None
+                    or abs(lin_hours - self.generator_runtime_hours)
+                    <= GENERATOR_RUNTIME_MAX_JUMP_TENTHS / 10
+                ):
+                    return lin_hours
+        return self.generator_runtime_hours if self.available else None
+
+    @property
+    def generator_runtime_source(self) -> str | None:
+        """Return the transport whose validated runtime is currently selected."""
+        value = self.lin.value("generator_runtime_hours")
+        if isinstance(value, (int, float)):
+            lin_hours = float(value)
+            if (
+                0.0 <= lin_hours <= GENERATOR_RUNTIME_MAX_PLAUSIBLE_TENTHS / 10
+                and (
+                    self.generator_runtime_hours is None
+                    or abs(lin_hours - self.generator_runtime_hours)
+                    <= GENERATOR_RUNTIME_MAX_JUMP_TENTHS / 10
+                )
+            ):
+                return "lin"
+        return "bluetooth" if self.available and self.generator_runtime_hours is not None else None
+
+    @property
     def generator_status_value(self) -> str | None:
+        confirmed_key = self.generator_status_key_value
+        if (
+            self._generator_command_pending_status is not None
+            and confirmed_key in self._generator_command_confirmation_keys
+            and confirmed_key != self._generator_command_baseline_key
+        ):
+            self.clear_generator_command_pending(notify=False)
+        if self._generator_command_pending_status is not None:
+            return self._generator_command_pending_status
         value = self.lin.value("generator_status")
         return str(value) if value is not None else (self.generator_status if self.available else None)
 
@@ -448,6 +540,8 @@ class PrecisionPlexStateCoordinator:
         return {
             "idle_off": "stopped",
             "running": "running",
+            "manual_starting": "manual_starting",
+            "manual_stopping": "manual_stopping",
             "auto_starting": "auto_starting",
             "auto_stopping": "auto_stopping",
         }.get(str(value), str(value))

@@ -3,6 +3,18 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.5 - LIN Generator Runtime and Responsive Generator Commands
+
+- Prefers the complete validated PIDBA LIN generator runtime and retains BLE
+  as a field-level fallback.
+- Adds immediate Start Requested, Stop Requested, AutoStart Requested, and
+  AutoStop Requested generator-status feedback while waiting for telemetry.
+- Keeps Generator Running authoritative rather than optimistically changing it.
+- Keeps generator command buttons available with the BLE command path instead
+  of cycling availability with each status, preventing false button activity.
+- Removes the unsupported fixed five-second PID32 schedule claim.
+- Pairs with firmware v0.6.2 and its corrected PID32 generator-running bit.
+
 ## v5.5.4 - Command-Responsive PID32 Controls
 
 - Added one shared provisional-state layer for every stateful Home Assistant
@@ -12,7 +24,7 @@ Detailed historical descriptions remain attached to their GitHub releases.
 - Made Bedroom, Wardrobe, and Sofa slide plus Patio Awning movement state react
   immediately to Home Assistant open, close, jog, and stop commands.
 - Prevented stale PID32 frames from bouncing controls back to their previous
-  state while the next five-second PID32 broadcast is pending.
+  state while the next scheduled PID32 broadcast is pending.
 - Reconciled provisional values automatically when PID32 or BLE 02BB confirms
   the command, with a safe 12-second fallback when confirmation never arrives.
 - Retained the independent 30-second LIN source freshness grace periods; those

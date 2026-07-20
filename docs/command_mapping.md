@@ -147,8 +147,8 @@ The mobile app pattern is:
 
 The integration reproduces this pattern for cover entities.
 
-On the tested coach, the authoritative PID32 output bitmap is scheduled about
-once every five seconds. Home Assistant commands therefore publish a
+On the tested coach, the authoritative PID32 output bitmap uses a slower
+rotating schedule. Home Assistant commands therefore publish a
 provisional requested state immediately. The next matching PID32 or BLE 02BB
 value confirms that request without a visible state reversal. If confirmation
 does not arrive within 12 seconds, the integration returns to authoritative

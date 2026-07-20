@@ -1,5 +1,12 @@
 # Release History
 
+## v5.5.5 - LIN Generator Runtime and Responsive Generator Commands
+
+- Added validated LIN-preferred generator runtime with Bluetooth fallback.
+- Added immediate requested-state feedback for generator commands.
+- Stabilized generator button availability to eliminate false Pressed activity.
+- Paired with ESPHome Precision Plex LIN v0.6.2.
+
 ## v5.5.4 - Command-Responsive PID32 Controls
 
 - Consolidates stateful HA controls behind one provisional PID32 state layer.

@@ -1,1 +1,1 @@
-Precision Plex v5.5.4 — Command-Responsive PID32 Controls
+Precision Plex v5.5.5 — LIN Generator Runtime and Responsive Generator Commands

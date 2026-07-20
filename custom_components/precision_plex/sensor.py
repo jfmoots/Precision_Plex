@@ -437,18 +437,19 @@ class PrecisionPlexGeneratorRuntimeSensor(PrecisionPlexBaseSensor):
     @property
     def native_value(self) -> float | None:
         """Return generator runtime hours."""
-        return self.coordinator.generator_runtime_hours
+        return self.coordinator.generator_runtime_hours_value
 
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.coordinator.generator_runtime_hours is not None
+        return self.coordinator.generator_runtime_hours_value is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
         """Return diagnostic attributes."""
         raw = self.coordinator.raw_battery_state
         return {
+            "telemetry_source": self.coordinator.generator_runtime_source,
             "source_handle": "0x002B",
             "source_characteristic": "02AA",
             "source_field": "bytes 7-8 big-endian tenths of hours",
@@ -456,7 +457,8 @@ class PrecisionPlexGeneratorRuntimeSensor(PrecisionPlexBaseSensor):
             "ignored_runtime_tenths": self.coordinator.ignored_generator_runtime_tenths,
             "ignored_runtime_reason": self.coordinator.ignored_generator_runtime_reason,
             "raw_02aa": raw.hex(" ") if raw is not None else None,
-            "mapping": "0x04B4=1204 tenths=120.4 hours",
+            "lin_mapping": "PIDBA data bytes 1-3 little-endian packed BCD whole hours plus page low-nibble tenths",
+            "ble_mapping": "0x04B4=1204 tenths=120.4 hours",
             "guard": "ignore >1000.0h, decreases, or jumps over 5.0h between accepted samples",
         }
 
