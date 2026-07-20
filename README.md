@@ -8,12 +8,12 @@ This custom integration provides local control and monitoring of supported Preci
 
 ## Current Stable Release
 
-**v5.4.1**
+**v5.4.2**
 
-v5.4.1 corrects Home Assistant device registration for LIN-backed output-state
-entities. It retains the automatic LIN-preferred telemetry and field-by-field
-BLE fallback introduced in v5.4.0, and expects LIN Analyzer Build 013.0 or
-newer.
+v5.4.2 pairs with LIN Analyzer Build 013.1 to provide flight-recorder-validated
+LIN movement telemetry for the bedroom slide, wardrobe slide, sofa, and patio
+awning. It retains the automatic LIN-preferred telemetry, field-by-field BLE
+fallback, and entity-registration correction from v5.4.1.
 
 ---
 
