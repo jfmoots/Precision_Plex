@@ -3,6 +3,15 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.7 - Thread-Safe LIN Updates
+
+- Marshaled the complete LIN coordinator update path onto Home Assistant's
+  event loop when a transport listener fires from another thread.
+- Kept same-loop LIN updates immediate while protecting snapshot expiry,
+  per-source expiry, discovery, state-change, and snapshot listener paths.
+- Captured each snapshot, command intent, and bridge identity at the listener
+  boundary so queued cross-thread updates retain the event that triggered them.
+
 ## v5.5.6 - Fast PID1F/PID5E Command Intent
 
 - Added one normalized command-intent consumer for PID1F and PID5E events.

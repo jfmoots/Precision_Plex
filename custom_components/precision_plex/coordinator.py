@@ -296,17 +296,42 @@ class PrecisionPlexStateCoordinator:
 
     @callback
     def _handle_lin_update(self) -> None:
-        """Apply one normalized bus command before publishing the LIN update."""
+        """Marshal a LIN transport update onto Home Assistant's event loop."""
         snapshot = self.lin.snapshot
+        intent = self.lin.command_intent
+        bridge_id = self.lin.bridge_id
+
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is self.hass.loop:
+            self._process_lin_update(snapshot, intent, bridge_id)
+        elif not self.hass.loop.is_closed():
+            self.hass.loop.call_soon_threadsafe(
+                self._process_lin_update,
+                snapshot,
+                intent,
+                bridge_id,
+            )
+
+    @callback
+    def _process_lin_update(
+        self,
+        snapshot: dict[str, object],
+        intent: dict[str, object] | None,
+        bridge_id: str | None,
+    ) -> None:
+        """Apply one normalized bus command and publish it from the HA loop."""
         uptime = snapshot.get("uptime_ms")
         if isinstance(uptime, int):
             if self._last_lin_uptime_ms is not None and uptime < self._last_lin_uptime_ms:
                 self._last_lin_command_identity = None
             self._last_lin_uptime_ms = uptime
 
-        intent = self.lin.command_intent
         if intent is not None:
-            identity = (self.lin.bridge_id, intent["sequence"])
+            identity = (bridge_id, intent["sequence"])
             if identity != self._last_lin_command_identity:
                 self._last_lin_command_identity = identity
                 self._apply_lin_command_intent(intent)

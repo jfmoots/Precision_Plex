@@ -1,5 +1,13 @@
 # Release History
 
+## v5.5.7 - Thread-Safe LIN Updates
+
+- Runs LIN-originated coordinator mutations and entity notifications on Home
+  Assistant's event loop, including timeout-driven availability changes.
+- Preserves immediate processing for listeners already executing on that loop.
+- Captures LIN update data before scheduling cross-thread work so command
+  intent events cannot be replaced by a newer snapshot while queued.
+
 ## v5.5.6 - Fast PID1F/PID5E Command Intent
 
 - Normalizes touchscreen and Wireless TP command traffic into immediate

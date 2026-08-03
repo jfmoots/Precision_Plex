@@ -1,1 +1,1 @@
-Precision Plex v5.5.6 — Fast PID1F/PID5E Command Intent
+Precision Plex v5.5.7 — Thread-Safe LIN Updates

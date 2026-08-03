@@ -5,7 +5,7 @@ systems.
 
 ## Current release
 
-**v5.5.6 - Fast LIN Command Intent**
+**v5.5.7 - Thread-Safe LIN Updates**
 
 - Prefers a discovered ESPHome Precision Plex LIN bridge for telemetry.
 - Retains Bluetooth as field-level fallback and for all commands.
@@ -13,6 +13,8 @@ systems.
 - Keeps a four-second whole-bridge timeout for genuine communication loss.
 - Observes PID1F touchscreen and PID5E Wireless TP command intent immediately,
   then reconciles it against authoritative PID32/02BB state.
+- Marshals every LIN telemetry/listener update onto Home Assistant's event loop
+  before changing coordinator state or updating entities.
 - Applies the same responsive state to covers, switches, lights, and their
   matching movement/status binary sensors.
 - Disables high-churn BLE forensic entities by default and migrates existing
