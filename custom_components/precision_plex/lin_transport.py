@@ -171,6 +171,13 @@ class PrecisionPlexLinTelemetry:
         if not isinstance(payload, dict) or payload.get("schema") != 1:
             return
 
+        # Firmware v0.6.4+ sends compact heartbeat payloads so Home Assistant
+        # does not receive the complete telemetry snapshot every two seconds.
+        # Merge those liveness fields into the last change snapshot while
+        # retaining compatibility with older firmware's full heartbeats.
+        if payload.get("snapshot_reason") == "heartbeat" and self._snapshot:
+            payload = {**self._snapshot, **payload}
+
         meaningful_changed = self._meaningful_snapshot(payload) != self._meaningful_snapshot(
             self._snapshot
         )

@@ -3,6 +3,18 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.8 - Recorder-Friendly Telemetry
+
+- Accepts compact v0.6.4 firmware heartbeats while preserving the last full
+  telemetry snapshot and the existing four-second bridge timeout.
+- Removes raw BLE packets, decoder mappings, high-frequency awning current,
+  packet counters, and snapshot counters from ordinary entity attributes.
+- Retains raw forensic data and the last complete LIN snapshot in Download
+  diagnostics; awning current remains available as its dedicated ESPHome
+  sensor.
+- Documents excluding the internal LIN snapshot event from Recorder history.
+- Pairs with ESPHome Precision Plex LIN v0.6.4.
+
 ## v5.5.7 - Thread-Safe LIN Updates
 
 - Marshaled the complete LIN coordinator update path onto Home Assistant's

@@ -5,7 +5,7 @@ systems.
 
 ## Current release
 
-**v5.5.7 - Thread-Safe LIN Updates**
+**v5.5.8 - Recorder-Friendly Telemetry**
 
 - Prefers a discovered ESPHome Precision Plex LIN bridge for telemetry.
 - Retains Bluetooth as field-level fallback and for all commands.
@@ -15,10 +15,15 @@ systems.
   then reconciles it against authoritative PID32/02BB state.
 - Marshals every LIN telemetry/listener update onto Home Assistant's event loop
   before changing coordinator state or updating entities.
+- Accepts compact firmware heartbeats without losing the last complete
+  telemetry snapshot.
 - Applies the same responsive state to covers, switches, lights, and their
   matching movement/status binary sensors.
 - Disables high-churn BLE forensic entities by default and migrates existing
   entries to the same quieter defaults.
+- Keeps raw packet bytes and transport counters out of ordinary entity
+  attributes while retaining them in Download diagnostics; live motor current
+  remains available from its dedicated ESPHome sensor.
 
 ## Supported systems
 
@@ -91,6 +96,17 @@ packet timestamps, counters, rejection details, and forensic logs are disabled
 by default to reduce Home Assistant Activity and recorder traffic. They can be
 re-enabled temporarily from the entity registry for troubleshooting. Detailed
 redacted information is also available through **Download diagnostics**.
+
+The internal snapshot event is live transport rather than useful history. To
+keep Recorder from storing it, add this event type to the existing Recorder
+exclusions and restart Home Assistant:
+
+```yaml
+recorder:
+  exclude:
+    event_types:
+      - esphome.precision_plex_lin_snapshot
+```
 
 ## Release history
 

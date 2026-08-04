@@ -103,16 +103,6 @@ class PrecisionPlexAwningLight(LightEntity):
         """Return diagnostic attributes."""
         return {
             "telemetry_source": self.coordinator.telemetry_source_for("awning_light"),
-            "state_word": (
-                f"0x{self.coordinator.state_word:04X}"
-                if self.coordinator.state_word is not None
-                else None
-            ),
-            "raw_02bb": (
-                self.coordinator.raw_state.hex(" ")
-                if self.coordinator.raw_state is not None
-                else None
-            ),
             "command_mode": "momentary_release_then_press",
             "command_confirmation_pending": self.coordinator.provisional_state_for("awning_light") is not None,
             "command_requested_state": self.coordinator.provisional_state_for("awning_light"),

@@ -1,1 +1,1 @@
-Precision Plex v5.5.7 — Thread-Safe LIN Updates
+Precision Plex v5.5.8 — Recorder-Friendly Telemetry

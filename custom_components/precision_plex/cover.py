@@ -388,17 +388,6 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             "telemetry_source": self.coordinator.telemetry_source_for(
                 self._plex_description.out_state_key
             ),
-            "state_word": (
-                f"0x{self.coordinator.state_word:04X}"
-                if self.coordinator.state_word is not None
-                else None
-            ),
-            "state_words": [f"0x{word:04X}" for word in self.coordinator.state_words],
-            "raw_02bb": (
-                self.coordinator.raw_state.hex(" ")
-                if self.coordinator.raw_state is not None
-                else None
-            ),
             "command_mode": "press_and_hold_stream",
             "active_ha_direction": self._active_direction,
             "tracked_motion_direction": self._motion_direction,
@@ -428,7 +417,6 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     "awning_control_method": (
                         "Smart Current Sense" if self._smart_awning_available() else "Timed"
                     ),
-                    "awning_motor_current": self._read_awning_current(),
                 }
             )
         if self._supports_pulse_telemetry():

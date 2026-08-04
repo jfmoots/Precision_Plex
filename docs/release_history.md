@@ -1,5 +1,13 @@
 # Release History
 
+## v5.5.8 - Recorder-Friendly Telemetry
+
+- Merges compact firmware heartbeats into the last complete LIN snapshot.
+- Keeps raw packets and high-churn research values out of operational entity
+  attributes while retaining them in Download diagnostics.
+- Documents excluding the internal snapshot event from Recorder.
+- Paired with ESPHome Precision Plex LIN v0.6.4.
+
 ## v5.5.7 - Thread-Safe LIN Updates
 
 - Runs LIN-originated coordinator mutations and entity notifications on Home

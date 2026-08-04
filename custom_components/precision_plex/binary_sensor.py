@@ -176,7 +176,7 @@ class PrecisionPlexStateBinarySensor(BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return diagnostic attributes."""
+        """Return stable operational attributes."""
         confirmed = self.coordinator.confirmed_bit_on(self.bit, self.word_index)
         requested = self.coordinator.provisional_state_for(self.key)
         return {
@@ -184,18 +184,6 @@ class PrecisionPlexStateBinarySensor(BinarySensorEntity):
             "confirmed_state": confirmed,
             "command_confirmation_pending": requested is not None,
             "command_requested_state": requested,
-            "state_word": (
-                f"0x{self.coordinator.state_word:04X}"
-                if self.coordinator.state_word is not None
-                else None
-            ),
-            "word_index": self.word_index,
-            "state_words": [f"0x{word:04X}" for word in self.coordinator.state_words],
-            "raw_02bb": (
-                self.coordinator.raw_state.hex(" ")
-                if self.coordinator.raw_state is not None
-                else None
-            ),
         }
 
 
@@ -254,27 +242,11 @@ class PrecisionPlexGeneratorRunningBinarySensor(BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return diagnostic attributes."""
-        raw = self.coordinator.raw_battery_state
+        """Return stable operational attributes."""
         return {
             "telemetry_source": self.coordinator.telemetry_source_for("generator_running"),
-            "source_handle": "0x002B",
-            "source_characteristic": "02AA",
-            "source_field": "byte 6 bit 0x10",
             "generator_status": self.coordinator.generator_status_value,
             "generator_status_key": self.coordinator.generator_status_key_value,
-            "raw_generator_status": (
-                f"0x{self.coordinator.raw_generator_status:02X}"
-                if isinstance(self.coordinator.raw_generator_status, int)
-                else None
-            ),
-            "raw_generator_status_word": (
-                f"0x{self.coordinator.raw_generator_status_word:04X}"
-                if isinstance(self.coordinator.raw_generator_status_word, int)
-                else None
-            ),
-            "raw_02aa": raw.hex(" ") if raw is not None else None,
-            "mapping": "0x10=running; managed transitions exposed by Generator Status sensor",
         }
 
 

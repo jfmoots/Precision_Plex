@@ -217,22 +217,9 @@ class PrecisionPlexCoachBatterySensor(PrecisionPlexBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
-        """Return diagnostic attributes."""
-        raw = self.coordinator.raw_battery_state
-        raw_word = None
-        if raw is not None and len(raw) >= 2:
-            raw_word = int.from_bytes(raw[0:2], "big")
+        """Return stable operational attributes."""
         return {
             "telemetry_source": self.coordinator.telemetry_source_for("coach_voltage"),
-            "source_handle": "0x002B",
-            "source_characteristic": "02AA",
-            "raw_tenths": raw_word,
-            "raw_02aa": raw.hex(" ") if raw is not None else None,
-            "rejected_02aa_count": self.coordinator.rejected_02aa_count,
-            "last_rejected_packet_reason": self.coordinator.last_rejected_packet_reason,
-            "pending_voltage_tenths": self.coordinator.pending_coach_voltage_tenths,
-            "rejected_voltage_tenths": self.coordinator.rejected_coach_voltage_tenths,
-            "rejected_voltage_reason": self.coordinator.rejected_coach_voltage_reason,
         }
 
 
@@ -262,20 +249,9 @@ class PrecisionPlexFreshWaterTankSensor(PrecisionPlexBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
-        """Return diagnostic attributes."""
-        raw = self.coordinator.raw_battery_state
+        """Return stable operational attributes."""
         return {
             "telemetry_source": self.coordinator.telemetry_source_for("fresh_water_level"),
-            "source_handle": "0x002B",
-            "source_characteristic": "02AA",
-            "raw_fresh_nibble": (
-                f"0x{self.coordinator.raw_fresh_level:X}"
-                if isinstance(self.coordinator.raw_fresh_level, int)
-                else None
-            ),
-            "source_field": "byte 2 low nibble",
-            "raw_02aa": raw.hex(" ") if raw is not None else None,
-            "mapping": "0x0=0%, 0x3=33%, 0x6=67%, 0xA=100%",
         }
 
 
@@ -305,20 +281,9 @@ class PrecisionPlexGreyWaterTankSensor(PrecisionPlexBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
-        """Return diagnostic attributes."""
-        raw = self.coordinator.raw_battery_state
+        """Return stable operational attributes."""
         return {
             "telemetry_source": self.coordinator.telemetry_source_for("grey_water_level"),
-            "source_handle": "0x002B",
-            "source_characteristic": "02AA",
-            "raw_grey_nibble": (
-                f"0x{self.coordinator.raw_grey_level:X}"
-                if isinstance(self.coordinator.raw_grey_level, int)
-                else None
-            ),
-            "source_field": "byte 3 high nibble",
-            "raw_02aa": raw.hex(" ") if raw is not None else None,
-            "mapping": "0x0=0%, 0x3=33%, 0x6=67%, 0xA=100%",
         }
 
 
@@ -348,20 +313,9 @@ class PrecisionPlexBlackWaterTankSensor(PrecisionPlexBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
-        """Return diagnostic attributes."""
-        raw = self.coordinator.raw_battery_state
+        """Return stable operational attributes."""
         return {
             "telemetry_source": self.coordinator.telemetry_source_for("black_water_level"),
-            "source_handle": "0x002B",
-            "source_characteristic": "02AA",
-            "raw_black_nibble": (
-                f"0x{self.coordinator.raw_black_level:X}"
-                if isinstance(self.coordinator.raw_black_level, int)
-                else None
-            ),
-            "source_field": "byte 4 high nibble",
-            "raw_02aa": raw.hex(" ") if raw is not None else None,
-            "mapping": "0x0=0%, 0x3=33%, 0x6=67%, 0xA=100%",
         }
 
 
@@ -391,31 +345,9 @@ class PrecisionPlexLPGasTankSensor(PrecisionPlexBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
-        """Return diagnostic attributes."""
-        raw = self.coordinator.raw_battery_state
+        """Return stable operational attributes."""
         return {
             "telemetry_source": self.coordinator.telemetry_source_for("lp_gas_level"),
-            "source_handle": "0x002B",
-            "source_characteristic": "02AA",
-            "raw_lp_byte": (
-                f"0x{self.coordinator.raw_lp_byte:02X}"
-                if isinstance(self.coordinator.raw_lp_byte, int)
-                else None
-            ),
-            "raw_lp_nibble": (
-                f"0x{self.coordinator.raw_lp_level:X}"
-                if isinstance(self.coordinator.raw_lp_level, int)
-                else None
-            ),
-            "last_rejected_lp_byte": (
-                f"0x{self.coordinator.last_rejected_lp_byte:02X}"
-                if isinstance(self.coordinator.last_rejected_lp_byte, int)
-                else None
-            ),
-            "last_rejected_lp_reason": self.coordinator.last_rejected_lp_reason,
-            "source_field": "byte 5 high nibble; byte 5 low nibble must be 0",
-            "raw_02aa": raw.hex(" ") if raw is not None else None,
-            "mapping": "clean LP bytes: 0x00=0%, 0x20=25%, 0x50=50%, 0x70=75%, 0xA0=100%; nonzero low-nibble LP bytes are ignored",
         }
 
 
@@ -446,20 +378,9 @@ class PrecisionPlexGeneratorRuntimeSensor(PrecisionPlexBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
-        """Return diagnostic attributes."""
-        raw = self.coordinator.raw_battery_state
+        """Return stable operational attributes."""
         return {
             "telemetry_source": self.coordinator.generator_runtime_source,
-            "source_handle": "0x002B",
-            "source_characteristic": "02AA",
-            "source_field": "bytes 7-8 big-endian tenths of hours",
-            "raw_runtime_tenths": self.coordinator.raw_generator_runtime_tenths,
-            "ignored_runtime_tenths": self.coordinator.ignored_generator_runtime_tenths,
-            "ignored_runtime_reason": self.coordinator.ignored_generator_runtime_reason,
-            "raw_02aa": raw.hex(" ") if raw is not None else None,
-            "lin_mapping": "PIDBA data bytes 1-3 little-endian packed BCD whole hours plus page low-nibble tenths",
-            "ble_mapping": "0x04B4=1204 tenths=120.4 hours",
-            "guard": "ignore >1000.0h, decreases, or jumps over 5.0h between accepted samples",
         }
 
 
@@ -487,27 +408,11 @@ class PrecisionPlexGeneratorStatusSensor(PrecisionPlexBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | bool | None]:
-        """Return diagnostic attributes."""
-        raw = self.coordinator.raw_battery_state
+        """Return stable operational attributes."""
         return {
             "telemetry_source": self.coordinator.telemetry_source_for("generator_status"),
-            "source_handle": "0x002B",
-            "source_characteristic": "02AA",
-            "source_field": "bytes 6-7 generator status/transition word",
             "generator_running": self.coordinator.generator_running_value,
             "generator_status_key": self.coordinator.generator_status_key_value,
-            "raw_generator_status": (
-                f"0x{self.coordinator.raw_generator_status:02X}"
-                if isinstance(self.coordinator.raw_generator_status, int)
-                else None
-            ),
-            "raw_generator_status_word": (
-                f"0x{self.coordinator.raw_generator_status_word:04X}"
-                if isinstance(self.coordinator.raw_generator_status_word, int)
-                else None
-            ),
-            "raw_02aa": raw.hex(" ") if raw is not None else None,
-            "mapping": "0004=Stopped, 1004=Running, 00A0=AutoStart Accepted, 2004=Will Not Start, 6004=Performing Generator AutoStart, 7004=Performing Generator AutoStop",
         }
 
 
@@ -539,14 +444,7 @@ class PrecisionPlexTelemetryTransportSensor(PrecisionPlexBaseSensor):
             "lin_entity_count": len(self.coordinator.lin.entity_ids),
             "lin_event_snapshot_active": self.coordinator.lin.snapshot_fresh,
             "lin_firmware_version": snapshot.get("firmware_version"),
-            "lin_snapshot_sequence": snapshot.get("snapshot_sequence"),
-            "lin_snapshot_reason": snapshot.get("snapshot_reason"),
             "lin_bus_active": snapshot.get("bus_active"),
-            "lin_packets_per_second": snapshot.get("packets_per_second"),
-            "lin_known_packets": snapshot.get("known_packets"),
-            "lin_unknown_packets": snapshot.get("unknown_packets"),
-            "lin_crc_errors": snapshot.get("crc_errors"),
-            "lin_last_pid": snapshot.get("last_pid"),
             "lin_command_intent_capable": self.coordinator.lin.command_intent_capable,
             "lin_command_sequence": snapshot.get("command_sequence"),
             "lin_command_source": snapshot.get("command_source"),

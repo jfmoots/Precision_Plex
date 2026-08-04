@@ -108,20 +108,6 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "telemetry_source": self.coordinator.telemetry_source_for(self.cfg["state_key"]),
-            "state_word": (
-                f"0x{self.coordinator.state_word:04X}"
-                if self.coordinator.state_word is not None
-                else None
-            ),
-            "raw_02bb": (
-                self.coordinator.raw_state.hex(" ")
-                if self.coordinator.raw_state is not None
-                else None
-            ),
-            "rejected_02bb_count": self.coordinator.rejected_02bb_count,
-            "suppressed_02bb_glitch_count": self.coordinator.suppressed_02bb_glitch_count,
-            "last_rejected_packet_reason": self.coordinator.last_rejected_packet_reason,
-            "pending_02bb_confirmations": self.coordinator.pending_02bb_confirmations,
             "command_mode": "state_aware_toggle",
             "command_confirmation_pending": self.coordinator.provisional_state_for(self.cfg["state_key"]) is not None,
             "command_requested_state": self.coordinator.provisional_state_for(self.cfg["state_key"]),

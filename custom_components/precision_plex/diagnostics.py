@@ -182,6 +182,7 @@ async def async_get_config_entry_diagnostics(
                 "outputs_active": getattr(getattr(coordinator, "lin", None), "outputs_active", False),
                 "bridge_device_id": getattr(getattr(coordinator, "lin", None), "device_id", None),
                 "mapped_entities": getattr(getattr(coordinator, "lin", None), "entity_ids", {}),
+                "snapshot": getattr(getattr(coordinator, "lin", None), "snapshot", {}),
             },
             "packet_health": {
                 "rejected_02aa_count": getattr(coordinator, "rejected_02aa_count", None),
