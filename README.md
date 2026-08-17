@@ -5,7 +5,12 @@ systems.
 
 ## Current release
 
-**v5.5.8 - Recorder-Friendly Telemetry**
+**v5.5.9 - Stable Awning Position After Restart**
+
+- Ignores stale awning motion bits during startup until authoritative idle
+  telemetry is received.
+- Preserves immediate command response, wall-panel tracking after startup, and
+  the smart Carefree Flip sequence's synthetic 100% open endpoint.
 
 - Prefers a discovered ESPHome Precision Plex LIN bridge for telemetry.
 - Retains Bluetooth as field-level fallback and for all commands.

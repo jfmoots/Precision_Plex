@@ -272,6 +272,11 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._motion_direction: str | None = None
         self._motion_started_at: float | None = None
         self._last_position_update_at: float | None = None
+        # Controller motion bits can briefly be stale while transports settle
+        # after an HA restart.  Do not let an old "out" bit advance the
+        # time-based awning estimate until the controller has first reported
+        # both directions idle.  Explicit HA commands arm tracking immediately.
+        self._startup_motion_ready = not self._is_awning()
         self._motion_verification_failed = False
         self._motion_verification_reason: str | None = None
         self._motion_verification_failed_at: float | None = None
@@ -1226,6 +1231,19 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         elif self._controller_is_in():
             controller_direction = "in"
 
+        if not self._startup_motion_ready:
+            if controller_direction is None and self.available:
+                self._startup_motion_ready = True
+                _LOGGER.debug(
+                    "Precision Plex awning startup motion guard armed after idle telemetry"
+                )
+            elif controller_direction is not None:
+                _LOGGER.debug(
+                    "Precision Plex awning ignored startup %s motion bit until idle telemetry",
+                    controller_direction,
+                )
+            return
+
         if controller_direction == self._motion_direction:
             self._update_estimated_position()
             return
@@ -1248,6 +1266,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
     def _start_tracking_motion(self, direction: str) -> None:
         """Begin position tracking for a movement direction."""
         now = time.monotonic()
+        self._startup_motion_ready = True
         self._motion_direction = direction
         self._pulse_settle_direction = None
         self._pulse_settle_until = None

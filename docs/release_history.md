@@ -1,5 +1,12 @@
 # Release History
 
+## v5.5.9 - Stable Awning Position After Restart
+
+- Prevents stale startup motion bits from increasing the patio awning's saved
+  time-based position estimate.
+- Arms unsolicited wall-panel motion tracking after confirmed idle telemetry.
+- Retains the current-sense Carefree Flip sequence and synthetic 100% endpoint.
+
 ## v5.5.8 - Recorder-Friendly Telemetry
 
 - Merges compact firmware heartbeats into the last complete LIN snapshot.

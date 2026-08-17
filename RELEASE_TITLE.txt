@@ -1,1 +1,1 @@
-Precision Plex v5.5.8 — Recorder-Friendly Telemetry
+Precision Plex v5.5.9 — Stable Awning Position After Restart

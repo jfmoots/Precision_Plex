@@ -3,6 +3,15 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.9 - Stable Awning Position After Restart
+
+- Prevents stale startup motion bits from advancing the patio awning's
+  time-based position estimate after a Home Assistant restart.
+- Waits for authoritative idle telemetry before accepting unsolicited awning
+  motion, while keeping Home Assistant commands immediately responsive.
+- Preserves the smart current-sense Carefree Flip sequence and its synthetic
+  100% open endpoint.
+
 ## v5.5.8 - Recorder-Friendly Telemetry
 
 - Accepts compact v0.6.4 firmware heartbeats while preserving the last full
