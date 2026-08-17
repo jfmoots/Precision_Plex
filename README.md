@@ -5,7 +5,12 @@ systems.
 
 ## Current release
 
-**v5.5.10 - Stable Carefree Flip Endpoint**
+**v5.5.11 - Authoritative Carefree Flip Completion**
+
+- Reports 100% after arm-lock detection, configured extend overrun, and the
+  complete configured Fabric Tighten retract sequence.
+- Holds that endpoint until authoritative PID32/02BB telemetry confirms both
+  motion directions idle.
 
 - Preserves the smart awning's synthetic 100% endpoint until controller-idle
   telemetry confirms the Carefree Flip has completely finished.

@@ -3,6 +3,15 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.11 - Authoritative Carefree Flip Completion
+
+- Keeps the synthetic 100% awning endpoint after the configured Fabric Tighten
+  duration completes.
+- Ignores provisional idle state while delayed PID32/02BB telemetry still
+  reports retract motion.
+- Releases endpoint protection only after authoritative controller telemetry
+  confirms both awning directions idle.
+
 ## v5.5.10 - Stable Carefree Flip Endpoint
 
 - Holds the smart awning's synthetic 100% endpoint through trailing Carefree

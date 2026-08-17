@@ -1,5 +1,11 @@
 # Release History
 
+## v5.5.11 - Authoritative Carefree Flip Completion
+
+- Holds the synthetic 100% endpoint after Fabric Tighten completes.
+- Uses confirmed controller motion bits—not provisional command state—to
+  determine when trailing retract telemetry is truly idle.
+
 ## v5.5.10 - Stable Carefree Flip Endpoint
 
 - Latches the current-sense 100% open endpoint through trailing Flip telemetry.

@@ -1241,9 +1241,23 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             self._motion_direction = None
             self._motion_started_at = None
             self._last_position_update_at = None
-            if controller_direction is None and self.available:
+
+            # The effective motion state includes our provisional command
+            # overlay, which is cleared as soon as the Fabric Tighten stream
+            # ends.  PID32/02BB can still report retract for several seconds.
+            # Release the synthetic endpoint only after authoritative controller
+            # telemetry confirms both directions idle.
+            out_desc = STATE_BITS[self._plex_description.out_state_key]
+            in_desc = STATE_BITS[self._plex_description.in_state_key]
+            confirmed_out = self.coordinator.confirmed_bit_on(
+                out_desc["bit"], out_desc.get("word_index", 0)
+            )
+            confirmed_in = self.coordinator.confirmed_bit_on(
+                in_desc["bit"], in_desc.get("word_index", 0)
+            )
+            if confirmed_out is False and confirmed_in is False:
                 _LOGGER.info(
-                    "Precision Plex awning synthetic %.0f%% endpoint confirmed after idle telemetry",
+                    "Precision Plex awning synthetic %.0f%% endpoint confirmed after authoritative idle telemetry",
                     self._synthetic_endpoint_hold,
                 )
                 self._synthetic_endpoint_hold = None
