@@ -1,5 +1,10 @@
 # Release History
 
+## v5.5.10 - Stable Carefree Flip Endpoint
+
+- Latches the current-sense 100% open endpoint through trailing Flip telemetry.
+- Releases the latch after confirmed controller idle or a new movement command.
+
 ## v5.5.9 - Stable Awning Position After Restart
 
 - Prevents stale startup motion bits from increasing the patio awning's saved

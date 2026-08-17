@@ -272,6 +272,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._motion_direction: str | None = None
         self._motion_started_at: float | None = None
         self._last_position_update_at: float | None = None
+        # Hold a current-sense endpoint through trailing controller motion
+        # telemetry (notably the Carefree Flip retract) until idle is observed.
+        self._synthetic_endpoint_hold: float | None = None
         # Controller motion bits can briefly be stale while transports settle
         # after an HA restart.  Do not let an old "out" bit advance the
         # time-based awning estimate until the controller has first reported
@@ -751,6 +754,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             if detected_arm_lock:
                 self._estimated_position = 100.0
                 self._position_source = "current_sense"
+                self._synthetic_endpoint_hold = 100.0
                 _LOGGER.info("Precision Plex smart awning open complete; position forced to 100%%")
             else:
                 _LOGGER.warning("Precision Plex smart awning open ended without arm-lock detection; current=%.2fA", self._read_awning_current() or 0.0)
@@ -1231,6 +1235,20 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         elif self._controller_is_in():
             controller_direction = "in"
 
+        if self._synthetic_endpoint_hold is not None:
+            self._estimated_position = self._synthetic_endpoint_hold
+            self._position_source = "current_sense"
+            self._motion_direction = None
+            self._motion_started_at = None
+            self._last_position_update_at = None
+            if controller_direction is None and self.available:
+                _LOGGER.info(
+                    "Precision Plex awning synthetic %.0f%% endpoint confirmed after idle telemetry",
+                    self._synthetic_endpoint_hold,
+                )
+                self._synthetic_endpoint_hold = None
+            return
+
         if not self._startup_motion_ready:
             if controller_direction is None and self.available:
                 self._startup_motion_ready = True
@@ -1266,6 +1284,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
     def _start_tracking_motion(self, direction: str) -> None:
         """Begin position tracking for a movement direction."""
         now = time.monotonic()
+        self._synthetic_endpoint_hold = None
         self._startup_motion_ready = True
         self._motion_direction = direction
         self._pulse_settle_direction = None

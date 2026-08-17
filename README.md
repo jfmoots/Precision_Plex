@@ -5,7 +5,12 @@ systems.
 
 ## Current release
 
-**v5.5.9 - Stable Awning Position After Restart**
+**v5.5.10 - Stable Carefree Flip Endpoint**
+
+- Preserves the smart awning's synthetic 100% endpoint until controller-idle
+  telemetry confirms the Carefree Flip has completely finished.
+- Prevents trailing retract telemetry from overwriting 100% with the roughly
+  91% time-based physical estimate.
 
 - Ignores stale awning motion bits during startup until authoritative idle
   telemetry is received.

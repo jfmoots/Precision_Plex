@@ -3,6 +3,13 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.10 - Stable Carefree Flip Endpoint
+
+- Holds the smart awning's synthetic 100% endpoint through trailing Carefree
+  Flip retract telemetry.
+- Releases the endpoint hold only after authoritative controller-idle telemetry.
+- Clears the hold normally when a genuine open, close, or jog begins.
+
 ## v5.5.9 - Stable Awning Position After Restart
 
 - Prevents stale startup motion bits from advancing the patio awning's
