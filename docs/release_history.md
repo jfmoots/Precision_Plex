@@ -1,5 +1,12 @@
 # Release History
 
+## v5.5.12 - Persistent Awning Endpoints
+
+- Restores near-endpoint time estimates as synthetic 0% closed or 100% open.
+- Persists ESPHome current-sense endpoint events for Home Assistant and
+  wall-panel movement.
+- Protects both endpoints from trailing motion telemetry until confirmed idle.
+
 ## v5.5.11 - Authoritative Carefree Flip Completion
 
 - Holds the synthetic 100% endpoint after Fabric Tighten completes.

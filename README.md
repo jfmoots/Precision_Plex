@@ -5,7 +5,14 @@ systems.
 
 ## Current release
 
-**v5.5.11 - Authoritative Carefree Flip Completion**
+**v5.5.12 - Persistent Awning Endpoints**
+
+- Restores near-closed time estimates such as 7% as the synthetic 0% seated
+  endpoint after a Home Assistant restart.
+- Restores near-open time estimates such as the roughly 91% Carefree Flip
+  position as the synthetic 100% endpoint.
+- Persists ESPHome extend and retract endpoint events immediately, including
+  movement initiated from the wall panel.
 
 - Reports 100% after arm-lock detection, configured extend overrun, and the
   complete configured Fabric Tighten retract sequence.

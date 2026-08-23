@@ -48,6 +48,7 @@ AWNING_CURRENT_ZERO_CONFIRM_SECONDS = 0.5
 AWNING_SMART_EXTRA_TIMEOUT_SECONDS = 5.0
 
 SLIDE_ENDPOINT_SNAP_PERCENT = 2.0
+AWNING_RESTORE_ENDPOINT_SNAP_PERCENT = 10.0
 
 # Quadrature-only motion verification: if a supported slide is commanded
 # but encoder travel does not change shortly after the hold stream begins,
@@ -253,6 +254,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         if description.key == "awning":
             self._attr_device_class = CoverDeviceClass.AWNING
         self._remove_listener = None
+        self._remove_awning_endpoint_listener = None
         self._command_lock = asyncio.Lock()
         self._hold_task: asyncio.Task | None = None
         self._stop_event: asyncio.Event | None = None
@@ -295,6 +297,10 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._remove_listener = self.coordinator.async_add_listener(
             self._handle_coordinator_update
         )
+        if self._is_awning():
+            self._remove_awning_endpoint_listener = self.hass.bus.async_listen(
+                "state_changed", self._handle_awning_endpoint_event
+            )
         self._sync_motion_from_state()
 
     async def _async_restore_last_position(self) -> None:
@@ -326,6 +332,24 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             )
             return
 
+        # The current-sense awning intentionally exposes synthetic endpoints:
+        # fully seated is 0%, and the completed Carefree Flip is 100%.  When
+        # movement came from the wall panel, the last time estimate can stop a
+        # few percent short because the motor reaches its physical endpoint
+        # before the configured full-travel timer.  Normalize those narrow
+        # endpoint bands during restore so a restart cannot turn a physically
+        # closed awning into 7%, or a completed Flip into roughly 91%.
+        restored_source = last_state.attributes.get("position_source")
+        if self._is_awning() and restored_source in (None, "time"):
+            if self._estimated_position <= AWNING_RESTORE_ENDPOINT_SNAP_PERCENT:
+                self._estimated_position = 0.0
+                self._position_source = "restored_endpoint"
+            elif self._estimated_position >= (
+                100.0 - AWNING_RESTORE_ENDPOINT_SNAP_PERCENT
+            ):
+                self._estimated_position = 100.0
+                self._position_source = "restored_endpoint"
+
         _LOGGER.debug(
             "Precision Plex %s restored estimated position to %.1f%%",
             self._plex_description.key,
@@ -338,11 +362,42 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         if self._remove_listener is not None:
             self._remove_listener()
             self._remove_listener = None
+        if self._remove_awning_endpoint_listener is not None:
+            self._remove_awning_endpoint_listener()
+            self._remove_awning_endpoint_listener = None
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated BLE state."""
         self._sync_motion_from_state()
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_awning_endpoint_event(self, event: Any) -> None:
+        """Persist current-sense awning endpoints from ESPHome telemetry."""
+        new_state = event.data.get("new_state")
+        if new_state is None or new_state.state != "on":
+            return
+
+        entity_id = str(event.data.get("entity_id", "")).lower()
+        if entity_id.endswith("_awning_retract_end_event"):
+            endpoint = 0.0
+        elif entity_id.endswith("_awning_extend_event"):
+            endpoint = 100.0
+        else:
+            return
+
+        self._estimated_position = endpoint
+        self._position_source = "current_sense"
+        self._synthetic_endpoint_hold = endpoint
+        self._motion_direction = None
+        self._motion_started_at = None
+        self._last_position_update_at = None
+        _LOGGER.info(
+            "Precision Plex awning endpoint telemetry forced position to %.0f%% from %s",
+            endpoint,
+            entity_id,
+        )
         self.async_write_ha_state()
 
     @property

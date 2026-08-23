@@ -3,6 +3,16 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.12 - Persistent Awning Endpoints
+
+- Normalizes restored time estimates within 10% of either awning endpoint to
+  the integration's synthetic 0% or 100% endpoint.
+- Listens continuously for ESPHome awning extend and retract endpoint events,
+  including wall-panel movement, and writes the confirmed endpoint to Home
+  Assistant immediately.
+- Holds both confirmed endpoints through trailing controller motion telemetry
+  until authoritative idle is reported.
+
 ## v5.5.11 - Authoritative Carefree Flip Completion
 
 - Keeps the synthetic 100% awning endpoint after the configured Fabric Tighten
