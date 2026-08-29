@@ -266,6 +266,8 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._last_quadrature_delta: float | None = None
         self._last_quadrature_sync_error: float | None = None
         self._quadrature_available = False
+        self._quadrature_retracted_total = 0.0
+        self._quadrature_extended_total: float | None = None
         # When the controller state bit drops, the ESPHome sensor update can lag
         # by a second or two. Keep applying pulse deltas briefly after motion
         # stops so the final encoder pulses are not missed.
@@ -308,6 +310,28 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         last_state = await self.async_get_last_state()
         if last_state is None:
             return
+
+        if self._supports_pulse_telemetry():
+            try:
+                self._quadrature_retracted_total = float(
+                    last_state.attributes.get("quadrature_retracted_total", 0.0)
+                )
+            except (TypeError, ValueError):
+                self._quadrature_retracted_total = 0.0
+
+            restored_extended_total = last_state.attributes.get(
+                "quadrature_extended_total"
+            )
+            if restored_extended_total is not None:
+                try:
+                    restored_extended_total = float(restored_extended_total)
+                except (TypeError, ValueError):
+                    restored_extended_total = None
+            if (
+                restored_extended_total is not None
+                and restored_extended_total > self._quadrature_retracted_total
+            ):
+                self._quadrature_extended_total = restored_extended_total
 
         restored_position = last_state.attributes.get("current_position")
 
@@ -494,6 +518,17 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                         if self._last_quadrature_delta is not None
                         else None
                     ),
+                    "quadrature_calibrated": (
+                        self._quadrature_extended_total is not None
+                    ),
+                    "quadrature_retracted_total": round(
+                        self._quadrature_retracted_total, 1
+                    ),
+                    "quadrature_extended_total": (
+                        round(self._quadrature_extended_total, 1)
+                        if self._quadrature_extended_total is not None
+                        else None
+                    ),
                     "quadrature_full_travel": self._quadrature_full_travel(),
                     "quadrature_sync_error": quadrature_sync_error,
                 }
@@ -608,7 +643,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             raise ValueError(f"Unsupported Precision Plex jog direction: {direction}")
 
     async def async_reset_estimated_position(self, position: float) -> None:
-        """Reset the estimated position without moving hardware."""
+        """Calibrate a quadrature endpoint or reset a timed estimate."""
         async with self._command_lock:
             await self._async_stop_hold_task()
             self._motion_direction = None
@@ -617,10 +652,48 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             self._active_direction = None
             self._pulse_settle_direction = None
             self._pulse_settle_until = None
-            self._estimated_position = max(0.0, min(100.0, float(position)))
-            self._last_quadrature_total = self._read_quadrature_travel_total()
+            target_position = max(0.0, min(100.0, float(position)))
+            current_total = self._read_quadrature_travel_total()
+
+            if self._supports_pulse_telemetry() and current_total is not None:
+                if target_position >= 99.0:
+                    if current_total <= self._quadrature_retracted_total:
+                        _LOGGER.warning(
+                            "Precision Plex %s could not calibrate extended endpoint: "
+                            "current %.1f is not above retracted %.1f",
+                            self._plex_description.key,
+                            current_total,
+                            self._quadrature_retracted_total,
+                        )
+                        return
+                    self._quadrature_extended_total = current_total
+                    target_position = 100.0
+                    _LOGGER.info(
+                        "Precision Plex %s calibrated extended endpoint to %.1f counts",
+                        self._plex_description.key,
+                        current_total,
+                    )
+                elif target_position <= 1.0:
+                    self._quadrature_retracted_total = current_total
+                    if (
+                        self._quadrature_extended_total is not None
+                        and self._quadrature_extended_total
+                        <= self._quadrature_retracted_total
+                    ):
+                        self._quadrature_extended_total = None
+                    target_position = 0.0
+                    _LOGGER.info(
+                        "Precision Plex %s calibrated retracted endpoint to %.1f counts",
+                        self._plex_description.key,
+                        current_total,
+                    )
+
+            self._estimated_position = target_position
+            self._last_quadrature_total = current_total
             self._last_quadrature_delta = None
-            self._position_source = "quadrature" if self._last_quadrature_total is not None else "time"
+            self._position_source = (
+                "quadrature_calibrated" if current_total is not None else "time"
+            )
             self.async_write_ha_state()
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
@@ -1437,9 +1510,10 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             self._last_quadrature_delta = None
 
         self._last_quadrature_total = current_total
+        position_total = current_total - self._quadrature_retracted_total
         self._estimated_position = max(
             0.0,
-            min(100.0, (current_total / full_travel) * 100.0),
+            min(100.0, (position_total / full_travel) * 100.0),
         )
         self._position_source = "quadrature"
         return True
@@ -1627,6 +1701,13 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
     def _quadrature_full_travel(self) -> float:
         """Return configured full-travel pulse count for this slide."""
+        if self._quadrature_extended_total is not None:
+            calibrated_span = (
+                self._quadrature_extended_total - self._quadrature_retracted_total
+            )
+            if calibrated_span > 0:
+                return calibrated_span
+
         config = self._telemetry_config() or {}
         setting_key = config.get("full_travel_setting_key")
         default_full_travel = float(config.get("default_full_travel_pulses", 1.0))

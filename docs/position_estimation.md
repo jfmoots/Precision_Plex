@@ -33,7 +33,8 @@ ESPHome `rotary_encoder` sensors decode each motor's Green/Yellow pair. The inte
 The cover position is calculated from:
 
 ```text
-position = quadrature_travel_total / quadrature_full_travel * 100
+position = (quadrature_travel_total - quadrature_retracted_total)
+           / quadrature_full_travel * 100
 ```
 
 The value is clamped to the Home Assistant cover range of 0-100%.
@@ -49,6 +50,13 @@ The value is clamped to the Home Assistant cover range of 0-100%.
 ## Startup Behavior
 
 When valid quadrature telemetry is present after a Home Assistant restart, the cover immediately uses `position_source: quadrature` and restores position from the ESPHome travel count. It does not wait for the first movement after restart.
+
+`Reset Fully Retracted` records the current travel count as
+`quadrature_retracted_total`. `Reset Fully Extended` records the current travel
+count as `quadrature_extended_total`; the difference between those values is
+the calibrated `quadrature_full_travel`. Home Assistant restores both learned
+endpoints after restart. The controls apply to Bedroom, Wardrobe, and Sofa
+slides only.
 
 ## Timing Fallback
 
@@ -74,7 +82,10 @@ Active quadrature telemetry appears in cover attributes:
 ```yaml
 position_source: quadrature
 quadrature_available: true
+quadrature_calibrated: true
 quadrature_travel_total: 13875.5
+quadrature_retracted_total: 2.5
+quadrature_extended_total: 13875.5
 quadrature_full_travel: 13873
 quadrature_sync_error: 67
 quadrature_last_delta: 0

@@ -5,7 +5,14 @@ systems.
 
 ## Current release
 
-**v5.5.12 - Persistent Awning Endpoints**
+**v5.5.13 - Persistent Slide Quadrature Calibration**
+
+- Makes each slide's Reset Fully Retracted button learn its live quadrature
+  zero and Reset Fully Extended learn its live full-travel count.
+- Persists the two learned endpoints in Home Assistant and calculates Bedroom,
+  Wardrobe, and Sofa positions between them.
+- Prevents the next quadrature refresh from erasing a manual endpoint reset.
+- Leaves Patio Awning behavior unchanged from v5.5.12.
 
 - Restores near-closed time estimates such as 7% as the synthetic 0% seated
   endpoint after a Home Assistant restart.

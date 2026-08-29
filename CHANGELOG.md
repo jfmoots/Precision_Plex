@@ -3,6 +3,15 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.13 - Persistent Slide Quadrature Calibration
+
+- Converts the Bedroom, Wardrobe, and Sofa Reset Fully Retracted/Extended
+  buttons into persistent two-point quadrature calibration controls.
+- Calculates slide position from the learned retracted and extended counts
+  instead of immediately overwriting resets with fixed default travel counts.
+- Adds calibration status and learned endpoint counts to slide diagnostics.
+- Does not change Patio Awning behavior.
+
 ## v5.5.12 - Persistent Awning Endpoints
 
 - Normalizes restored time estimates within 10% of either awning endpoint to

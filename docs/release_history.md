@@ -1,5 +1,13 @@
 # Release History
 
+## v5.5.13 - Persistent Slide Quadrature Calibration
+
+- Learns and restores separate retracted and extended quadrature totals for
+  Bedroom, Wardrobe, and Sofa slides.
+- Makes endpoint reset buttons persist the live encoder calibration rather
+  than setting a position that the next telemetry update immediately replaces.
+- Leaves the Patio Awning implementation unchanged.
+
 ## v5.5.12 - Persistent Awning Endpoints
 
 - Restores near-endpoint time estimates as synthetic 0% closed or 100% open.
