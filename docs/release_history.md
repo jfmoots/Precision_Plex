@@ -1,5 +1,12 @@
 # Release History
 
+## v5.5.14 - Automatic Slide Endpoint Learning
+
+- Persists the observed quadrature count after successful full slide commands.
+- Keeps completed full retract/extend positions at 0%/100% across subsequent
+  telemetry updates and Home Assistant restarts.
+- Excludes jogs, intermediate targets, interrupted commands, and the awning.
+
 ## v5.5.13 - Persistent Slide Quadrature Calibration
 
 - Learns and restores separate retracted and extended quadrature totals for

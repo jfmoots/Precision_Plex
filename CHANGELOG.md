@@ -3,6 +3,15 @@
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
+## v5.5.14 - Automatic Slide Endpoint Learning
+
+- Learns and persists the live Bedroom, Wardrobe, or Sofa quadrature endpoint
+  when a full extend/retract command completes normally.
+- Fixes completed movements snapping to 100%/0% only temporarily before the
+  next quadrature update restored an intermediate percentage.
+- Does not learn endpoints from jogs, partial-position moves, or stopped
+  commands, and does not change Patio Awning behavior.
+
 ## v5.5.13 - Persistent Slide Quadrature Calibration
 
 - Converts the Bedroom, Wardrobe, and Sofa Reset Fully Retracted/Extended

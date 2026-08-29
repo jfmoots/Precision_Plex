@@ -5,6 +5,15 @@ systems.
 
 ## Current release
 
+**v5.5.14 - Automatic Slide Endpoint Learning**
+
+- Automatically learns the live quadrature count after a successful full
+  extend or retract command, then persists the resulting 100% or 0% endpoint.
+- Prevents the next telemetry refresh from replacing a completed retract with
+  an intermediate percentage such as the Sofa Slide's observed 61%.
+- Keeps manual Reset Fully Retracted/Extended calibration available and leaves
+  Patio Awning behavior unchanged.
+
 **v5.5.13 - Persistent Slide Quadrature Calibration**
 
 - Makes each slide's Reset Fully Retracted button learn its live quadrature

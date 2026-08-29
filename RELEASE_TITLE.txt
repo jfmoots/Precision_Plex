@@ -1,1 +1,1 @@
-Precision Plex v5.5.13 — Persistent Slide Quadrature Calibration
+Precision Plex v5.5.14 — Automatic Slide Endpoint Learning

@@ -552,6 +552,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             release_payload=self._plex_description.out_release_payload,
             hold_payload=self._plex_description.out_hold_payload,
             max_duration_seconds=remaining_seconds,
+            target_endpoint=100.0,
         )
 
     async def async_close_cover(self, **kwargs: Any) -> None:
@@ -571,6 +572,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             release_payload=self._plex_description.in_release_payload,
             hold_payload=self._plex_description.in_hold_payload,
             max_duration_seconds=remaining_seconds,
+            target_endpoint=0.0,
         )
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
@@ -611,6 +613,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 release_payload=self._plex_description.out_release_payload,
                 hold_payload=self._plex_description.out_hold_payload,
                 max_duration_seconds=seconds,
+                target_endpoint=100.0 if target_position >= 99.0 else None,
             )
         else:
             seconds = (abs(delta) / 100.0) * self._in_full_seconds()
@@ -619,6 +622,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 release_payload=self._plex_description.in_release_payload,
                 hold_payload=self._plex_description.in_hold_payload,
                 max_duration_seconds=seconds,
+                target_endpoint=0.0 if target_position <= 1.0 else None,
             )
 
 
@@ -656,37 +660,10 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             current_total = self._read_quadrature_travel_total()
 
             if self._supports_pulse_telemetry() and current_total is not None:
-                if target_position >= 99.0:
-                    if current_total <= self._quadrature_retracted_total:
-                        _LOGGER.warning(
-                            "Precision Plex %s could not calibrate extended endpoint: "
-                            "current %.1f is not above retracted %.1f",
-                            self._plex_description.key,
-                            current_total,
-                            self._quadrature_retracted_total,
-                        )
-                        return
-                    self._quadrature_extended_total = current_total
-                    target_position = 100.0
-                    _LOGGER.info(
-                        "Precision Plex %s calibrated extended endpoint to %.1f counts",
-                        self._plex_description.key,
-                        current_total,
-                    )
-                elif target_position <= 1.0:
-                    self._quadrature_retracted_total = current_total
-                    if (
-                        self._quadrature_extended_total is not None
-                        and self._quadrature_extended_total
-                        <= self._quadrature_retracted_total
-                    ):
-                        self._quadrature_extended_total = None
-                    target_position = 0.0
-                    _LOGGER.info(
-                        "Precision Plex %s calibrated retracted endpoint to %.1f counts",
-                        self._plex_description.key,
-                        current_total,
-                    )
+                if not self._calibrate_quadrature_endpoint(
+                    target_position, current_total
+                ):
+                    return
 
             self._estimated_position = target_position
             self._last_quadrature_total = current_total
@@ -695,6 +672,41 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 "quadrature_calibrated" if current_total is not None else "time"
             )
             self.async_write_ha_state()
+
+    def _calibrate_quadrature_endpoint(
+        self, target_position: float, current_total: float
+    ) -> bool:
+        """Learn a slide endpoint from the current quadrature travel count."""
+        if target_position >= 99.0:
+            if current_total <= self._quadrature_retracted_total:
+                _LOGGER.warning(
+                    "Precision Plex %s could not calibrate extended endpoint: "
+                    "current %.1f is not above retracted %.1f",
+                    self._plex_description.key,
+                    current_total,
+                    self._quadrature_retracted_total,
+                )
+                return False
+            self._quadrature_extended_total = current_total
+            _LOGGER.info(
+                "Precision Plex %s calibrated extended endpoint to %.1f counts",
+                self._plex_description.key,
+                current_total,
+            )
+        elif target_position <= 1.0:
+            self._quadrature_retracted_total = current_total
+            if (
+                self._quadrature_extended_total is not None
+                and self._quadrature_extended_total
+                <= self._quadrature_retracted_total
+            ):
+                self._quadrature_extended_total = None
+            _LOGGER.info(
+                "Precision Plex %s calibrated retracted endpoint to %.1f counts",
+                self._plex_description.key,
+                current_total,
+            )
+        return True
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop cover movement."""
@@ -1133,6 +1145,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         release_payload: bytes,
         hold_payload: bytes,
         max_duration_seconds: float,
+        target_endpoint: float | None = None,
     ) -> None:
         """Start app-like hold stream for a direction."""
         async with self._command_lock:
@@ -1151,6 +1164,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     hold_payload=hold_payload,
                     stop_event=self._stop_event,
                     max_duration_seconds=max_duration_seconds,
+                    target_endpoint=target_endpoint,
                 )
             )
             self.async_write_ha_state()
@@ -1162,6 +1176,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         hold_payload: bytes,
         stop_event: asyncio.Event,
         max_duration_seconds: float,
+        target_endpoint: float | None,
     ) -> None:
         """Run hold stream and clean up when complete."""
         completed_by_timeout = False
@@ -1206,13 +1221,22 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
             self._update_estimated_position()
 
-            # If the task ended because its timer expired, snap to the expected
-            # endpoint only when the command was a full open/full close.
-            if completed_by_timeout:
-                if direction == "out" and max_duration_seconds >= self._remaining_open_seconds() - 0.25:
-                    self._estimated_position = 100.0
-                elif direction == "in" and max_duration_seconds >= self._remaining_close_seconds() - 0.25:
-                    self._estimated_position = 0.0
+            # A successful native full-open/full-close command is authoritative.
+            # Learn the live quadrature endpoint before snapping so the next
+            # telemetry refresh cannot overwrite 100%/0% with the old count.
+            # Jog and intermediate-position commands do not pass an endpoint.
+            if completed_by_timeout and target_endpoint is not None:
+                current_total = self._read_quadrature_travel_total()
+                if (
+                    current_total is not None
+                    and self._calibrate_quadrature_endpoint(
+                        target_endpoint, current_total
+                    )
+                ):
+                    self._last_quadrature_total = current_total
+                    self._last_quadrature_delta = None
+                    self._position_source = "quadrature_calibrated"
+                self._estimated_position = target_endpoint
 
             self._motion_direction = None
             self._set_provisional_motion(None)
