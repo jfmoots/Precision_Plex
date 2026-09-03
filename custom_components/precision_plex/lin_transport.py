@@ -18,6 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 LIN_SNAPSHOT_EVENT = "esphome.precision_plex_lin_snapshot"
 SNAPSHOT_MAX_AGE_SECONDS = 4.0
 SOURCE_GRACE_SECONDS = 30.0
+COMMAND_INTENT_MAX_AGE_MS = 5000
 _SNAPSHOT_SOURCE_KEYS = {
     "core": "telemetry_active",
     "outputs": "outputs_active",
@@ -121,6 +122,8 @@ class PrecisionPlexLinTelemetry:
             source: None for source in _SNAPSHOT_SOURCE_KEYS
         }
         self.bridge_id: str | None = None
+        self._legacy_initial_command_identity: tuple[str, int] | None = None
+        self._last_uptime_ms: int | None = None
 
     @callback
     def start(self) -> None:
@@ -157,6 +160,8 @@ class PrecisionPlexLinTelemetry:
             source: None for source in _SNAPSHOT_SOURCE_KEYS
         }
         self.bridge_id = None
+        self._legacy_initial_command_identity = None
+        self._last_uptime_ms = None
 
     @callback
     def _handle_snapshot(self, event: Event) -> None:
@@ -183,7 +188,14 @@ class PrecisionPlexLinTelemetry:
         )
         bridge_id = str(event.data.get("bridge_id") or "unknown")
         bridge_changed = bridge_id != self.bridge_id
-        if bridge_changed:
+        uptime_ms = payload.get("uptime_ms")
+        bridge_restarted = (
+            isinstance(uptime_ms, int)
+            and self._last_uptime_ms is not None
+            and uptime_ms < self._last_uptime_ms
+        )
+        if bridge_changed or bridge_restarted:
+            self._legacy_initial_command_identity = None
             self._source_last_active = {
                 source: None for source in _SNAPSHOT_SOURCE_KEYS
             }
@@ -191,6 +203,21 @@ class PrecisionPlexLinTelemetry:
                 if self._unsub_source_expiry[source] is not None:
                     self._unsub_source_expiry[source]()
                     self._unsub_source_expiry[source] = None
+        if isinstance(uptime_ms, int):
+            self._last_uptime_ms = uptime_ms
+        sequence = payload.get("command_sequence")
+        if (
+            self._legacy_initial_command_identity is None
+            and isinstance(sequence, int)
+            and sequence > 0
+            and not isinstance(payload.get("command_age_ms"), int)
+        ):
+            # Firmware before v0.6.5 has no command age. Its first complete
+            # snapshot can contain an arbitrarily old intent retained across
+            # a Home Assistant restart, so establish a baseline without
+            # replaying that intent.
+            self._legacy_initial_command_identity = (bridge_id, sequence)
+
         self._snapshot = payload
         received = time.monotonic()
         self._snapshot_received = received
@@ -377,6 +404,12 @@ class PrecisionPlexLinTelemetry:
             return None
         sequence = self._snapshot.get("command_sequence")
         if not isinstance(sequence, int) or sequence <= 0:
+            return None
+        command_age_ms = self._snapshot.get("command_age_ms")
+        if isinstance(command_age_ms, int):
+            if command_age_ms > COMMAND_INTENT_MAX_AGE_MS:
+                return None
+        elif self._legacy_initial_command_identity == (self.bridge_id, sequence):
             return None
         return {
             "sequence": sequence,

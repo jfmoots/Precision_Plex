@@ -1,5 +1,15 @@
 # Changelog
 
+## v5.5.15 - Restart-Safe LIN Synchronization
+
+- Rejects command intents older than five seconds when the bridge supplies
+  command age, preventing cached awning or slide commands from being replayed
+  during initial synchronization.
+- Establishes a no-replay command baseline for older bridge firmware that
+  cannot report command age.
+- Pairs with LIN bridge firmware v0.6.5, which periodically resends complete
+  telemetry after Home Assistant restarts.
+
 This file consolidates the former collection of individual release-note files.
 Detailed historical descriptions remain attached to their GitHub releases.
 
