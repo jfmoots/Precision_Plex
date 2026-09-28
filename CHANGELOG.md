@@ -6,8 +6,9 @@
   waiting for the LIN bridge to echo the outgoing PID5E command.
 - Matches that fast LIN echo to the already-published local request so it is
   not interpreted as a second toggle.
-- Extends PID32 confirmation hold time from 12 to 45 seconds, covering the
-  observed slow output-bitmap rotation without an on/off UI bounce.
+- Extends PID32 confirmation hold time from 12 to 45 seconds, covering observed
+  cases where frequent PID32 frames retain the old output bit for more than 12
+  seconds without causing an on/off UI bounce.
 - Applies the same behavior to awning light, water pump, and water heater
   controls while retaining PID32 as authoritative confirmation.
 
