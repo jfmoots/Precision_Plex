@@ -127,12 +127,16 @@ class PrecisionPlexAwningLight(LightEntity):
             if current_state is desired_state:
                 return
 
-            self.coordinator.set_provisional_state("awning_light", desired_state)
+            self.coordinator.set_local_provisional_state(
+                "awning_light", desired_state
+            )
             try:
                 await self.coordinator.async_write_command_sequence(
                     AWNING_LIGHT_TAP_SEQUENCE,
                     delay_seconds=TAP_DELAY_SECONDS,
+                    local_toggle_key="awning_light",
                 )
             except Exception:
+                self.coordinator.clear_local_toggle_intent("awning_light")
                 self.coordinator.clear_provisional_state("awning_light")
                 raise

@@ -1,5 +1,16 @@
 # Changelog
 
+## v5.5.16 - Immediate Toggle Feedback
+
+- Publishes Home Assistant and HomeKit toggle requests immediately instead of
+  waiting for the LIN bridge to echo the outgoing PID5E command.
+- Matches that fast LIN echo to the already-published local request so it is
+  not interpreted as a second toggle.
+- Extends PID32 confirmation hold time from 12 to 45 seconds, covering the
+  observed slow output-bitmap rotation without an on/off UI bounce.
+- Applies the same behavior to awning light, water pump, and water heater
+  controls while retaining PID32 as authoritative confirmation.
+
 ## v5.5.15 - Restart-Safe LIN Synchronization
 
 - Rejects command intents older than five seconds when the bridge supplies

@@ -1,1 +1,1 @@
-Precision Plex v5.5.14 — Automatic Slide Endpoint Learning
+Precision Plex v5.5.16 — Immediate Toggle Feedback

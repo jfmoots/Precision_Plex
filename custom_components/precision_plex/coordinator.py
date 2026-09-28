@@ -43,7 +43,8 @@ COACH_VOLTAGE_MAX_TENTHS = 158
 COACH_VOLTAGE_MAX_UNCONFIRMED_JUMP_TENTHS = 10
 STATE_FRAME_MIN_LEN = 4
 STATE_FRAME_MAX_LEN = 20
-PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS = 12.0
+PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS = 45.0
+LOCAL_TOGGLE_INTENT_MATCH_SECONDS = 5.0
 GENERATOR_COMMAND_FEEDBACK_TIMEOUT_SECONDS = 12.0
 
 _MOTION_OPPOSITES = {
@@ -166,6 +167,7 @@ class PrecisionPlexStateCoordinator:
         self._start_unsub: Callable[[], None] | None = None
         self._provisional_states: dict[str, bool] = {}
         self._provisional_expiry_unsubs: dict[str, Callable[[], None]] = {}
+        self._local_toggle_intent_deadlines: dict[str, float] = {}
         self._generator_command_pending_status: str | None = None
         self._generator_command_confirmation_keys: set[str] = set()
         self._generator_command_baseline_key: str | None = None
@@ -349,6 +351,15 @@ class PrecisionPlexStateCoordinator:
             return
 
         if action == "toggle":
+            local_deadline = self._local_toggle_intent_deadlines.pop(key, None)
+            if (
+                local_deadline is not None
+                and self.hass.loop.time() <= local_deadline
+            ):
+                # The integration already published the desired state before
+                # writing the command.  The fast LIN intent is the echo of
+                # that same command, not a second toggle.
+                return
             current = self._provisional_states.get(key)
             if current is None:
                 description = self.profile["state_bits"].get(key)
@@ -430,6 +441,39 @@ class PrecisionPlexStateCoordinator:
         )
 
     @callback
+    def set_local_provisional_state(
+        self,
+        key: str,
+        value: bool,
+        timeout_seconds: float = PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
+    ) -> None:
+        """Publish a locally requested toggle state immediately."""
+        self.set_provisional_state(
+            key,
+            value,
+            timeout_seconds,
+            force=True,
+        )
+
+    @callback
+    def _arm_local_toggle_intent(self, key: str) -> None:
+        """Match the next fast LIN toggle event to a write about to be sent."""
+        now = self.hass.loop.time()
+        self._local_toggle_intent_deadlines = {
+            pending_key: deadline
+            for pending_key, deadline in self._local_toggle_intent_deadlines.items()
+            if deadline > now
+        }
+        self._local_toggle_intent_deadlines[key] = (
+            now + LOCAL_TOGGLE_INTENT_MATCH_SECONDS
+        )
+
+    @callback
+    def clear_local_toggle_intent(self, key: str) -> None:
+        """Forget a local toggle whose transport write did not complete."""
+        self._local_toggle_intent_deadlines.pop(key, None)
+
+    @callback
     def set_provisional_states(
         self,
         values: dict[str, bool],
@@ -497,6 +541,7 @@ class PrecisionPlexStateCoordinator:
             unsub()
         self._provisional_expiry_unsubs.clear()
         self._provisional_states.clear()
+        self._local_toggle_intent_deadlines.clear()
         if existed and notify:
             self._notify_listeners()
 
@@ -885,13 +930,20 @@ class PrecisionPlexStateCoordinator:
         self.available = True
         self._notify_listeners()
 
-    async def async_write_command(self, payload: bytes) -> None:
+    async def async_write_command(
+        self,
+        payload: bytes,
+        *,
+        local_toggle_key: str | None = None,
+    ) -> None:
         """Write a known-good Precision Plex command payload."""
         if self._stopped:
             raise BleakError("Precision Plex coordinator is stopped")
 
         async with self._write_lock:
             client, control_char = await self._async_get_control_char()
+            if local_toggle_key is not None:
+                self._arm_local_toggle_intent(local_toggle_key)
             await asyncio.wait_for(
                 client.write_gatt_char(control_char, payload, response=True),
                 timeout=GATT_TIMEOUT,
@@ -901,6 +953,8 @@ class PrecisionPlexStateCoordinator:
         self,
         payloads: list[bytes],
         delay_seconds: float = 0.25,
+        *,
+        local_toggle_key: str | None = None,
     ) -> None:
         """Write a sequence of known-good Precision Plex command payloads."""
         if self._stopped:
@@ -910,6 +964,11 @@ class PrecisionPlexStateCoordinator:
             client, control_char = await self._async_get_control_char()
 
             for index, payload in enumerate(payloads):
+                if (
+                    local_toggle_key is not None
+                    and index == len(payloads) - 1
+                ):
+                    self._arm_local_toggle_intent(local_toggle_key)
                 await asyncio.wait_for(
                     client.write_gatt_char(control_char, payload, response=True),
                     timeout=GATT_TIMEOUT,

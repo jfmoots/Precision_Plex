@@ -125,12 +125,18 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
         async with self._command_lock:
             if self.is_on is desired_state:
                 return
-            self.coordinator.set_provisional_state(
+            self.coordinator.set_local_provisional_state(
                 self.cfg["state_key"],
                 desired_state,
             )
             try:
-                await self.coordinator.async_write_command(self.cfg["payload"])
+                await self.coordinator.async_write_command(
+                    self.cfg["payload"],
+                    local_toggle_key=self.cfg["state_key"],
+                )
             except Exception:
+                self.coordinator.clear_local_toggle_intent(
+                    self.cfg["state_key"]
+                )
                 self.coordinator.clear_provisional_state(self.cfg["state_key"])
                 raise

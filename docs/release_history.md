@@ -1,5 +1,13 @@
 # Release History
 
+## v5.5.16 - Immediate Toggle Feedback
+
+- Makes local awning-light, water-pump, and water-heater commands visible to
+  Home Assistant and HomeKit before the Bluetooth write completes.
+- Consumes the resulting fast LIN command echo without double-toggling state.
+- Holds the requested state through one full slow PID32 rotation, eliminating
+  the 12-second fallback bounce seen before authoritative confirmation.
+
 ## v5.5.14 - Automatic Slide Endpoint Learning
 
 - Persists the observed quadrature count after successful full slide commands.
