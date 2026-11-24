@@ -1,5 +1,12 @@
 # Changelog
 
+## v5.5.17 - LIN Patio Awning Control
+
+- Prefers a compatible ESPHome bridge for patio-awning movement, including the Carefree flip.
+- Renews LIN movement leases while awaiting acknowledgement and checks PID32 for stop feedback.
+- Prefers acknowledged LIN commands for the awning light, water pump, and water heater.
+- Uses Bluetooth when LIN is unavailable before sending or confirms that it sent no command.
+
 ## v5.5.16 - Immediate Toggle Feedback
 
 - Publishes Home Assistant and HomeKit toggle requests immediately instead of
