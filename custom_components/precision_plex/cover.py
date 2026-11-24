@@ -735,10 +735,12 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             # Send both releases for safety. These are best-effort so a stale
             # BlueZ/Bleak connection cannot make the entity unavailable from
             # an exception in the websocket service call.
-            for payload in (
+            # The active awning stream releases through its own transport.
+            release_payloads = (
                 self._plex_description.out_release_payload,
                 self._plex_description.in_release_payload,
-            ):
+            ) if not self._is_awning() or no_ha_stream else ()
+            for payload in release_payloads:
                 try:
                     await self.coordinator.async_write_command(payload)
                 except Exception as err:
@@ -806,15 +808,17 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         """
         detected_arm_lock = False
         stream_task: asyncio.Task | None = None
+        extend_stop_event = asyncio.Event()
         try:
             max_duration = self._out_full_seconds() + AWNING_SMART_EXTRA_TIMEOUT_SECONDS
             stream_task = asyncio.create_task(
                 self.coordinator.async_write_hold_stream(
                     release_payload=self._plex_description.out_release_payload,
                     hold_payload=self._plex_description.out_hold_payload,
-                    stop_event=stop_event,
+                    stop_event=extend_stop_event,
                     interval_seconds=HOLD_INTERVAL_SECONDS,
                     max_duration_seconds=max_duration,
+                    lin_awning_direction="out",
                 )
             )
 
@@ -859,39 +863,37 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     _LOGGER.info("Precision Plex smart awning open overrun complete; stopping extend stream")
 
 
-            stop_event.set()
+            extend_stop_event.set()
 
             if stream_task is not None:
-                await stream_task
+                transport = await stream_task
                 _LOGGER.info("Precision Plex smart awning extend stream stopped; detected_arm_lock=%s current=%.2fA", detected_arm_lock, self._read_awning_current() or 0.0)
 
             # Send one explicit extend release after the hold stream exits. This
             # mirrors the manual Stop behavior and makes sure the Precision Plex
             # controller is not left latched before the fabric-tighten retract.
-            try:
-                await self.coordinator.async_write_command(self._plex_description.out_release_payload)
-            except Exception as err:
-                _LOGGER.debug("Precision Plex smart awning open extra extend release failed safely: %r", err)
+            if transport == "bluetooth":
+                try:
+                    await self.coordinator.async_write_command(self._plex_description.out_release_payload)
+                except Exception as err:
+                    _LOGGER.debug("Precision Plex smart awning open extra extend release failed safely: %r", err)
 
-            if detected_arm_lock and flip_seconds > 0 and not self._stop_event_cancelled_externally():
+            if detected_arm_lock and flip_seconds > 0 and not stop_event.is_set():
                 _LOGGER.info("Precision Plex smart awning Carefree flip started for %.2fs", flip_seconds)
                 self._active_direction = "in"
                 self._start_tracking_motion("in")
                 self._set_provisional_motion("in")
-                flip_stop_event = asyncio.Event()
-                try:
-                    await self.coordinator.async_write_hold_stream(
-                        release_payload=self._plex_description.in_release_payload,
-                        hold_payload=self._plex_description.in_hold_payload,
-                        stop_event=flip_stop_event,
-                        interval_seconds=HOLD_INTERVAL_SECONDS,
-                        max_duration_seconds=flip_seconds,
-                    )
-                finally:
-                    flip_stop_event.set()
+                await self.coordinator.async_write_hold_stream(
+                    release_payload=self._plex_description.in_release_payload,
+                    hold_payload=self._plex_description.in_hold_payload,
+                    stop_event=stop_event,
+                    interval_seconds=HOLD_INTERVAL_SECONDS,
+                    max_duration_seconds=flip_seconds,
+                    lin_awning_direction="in",
+                )
                 _LOGGER.info("Precision Plex smart awning Carefree flip complete; current=%.2fA", self._read_awning_current() or 0.0)
 
-            if detected_arm_lock:
+            if detected_arm_lock and not stop_event.is_set():
                 self._estimated_position = 100.0
                 self._position_source = "current_sense"
                 self._synthetic_endpoint_hold = 100.0
@@ -904,6 +906,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 err,
             )
         finally:
+            extend_stop_event.set()
             if stream_task is not None and not stream_task.done():
                 stream_task.cancel()
                 try:
@@ -945,6 +948,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     stop_event=stop_event,
                     interval_seconds=HOLD_INTERVAL_SECONDS,
                     max_duration_seconds=max_duration,
+                    lin_awning_direction="in",
                 )
             )
 
@@ -998,16 +1002,17 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             stop_event.set()
 
             if stream_task is not None:
-                await stream_task
+                transport = await stream_task
 
             # Always send one additional release after the stream exits.  This is
             # intentionally redundant and mirrors the manual Stop action that
             # clears the Precision Plex active/moving bit if the stream exit
             # release was missed or the controller stayed latched.
-            try:
-                await self.coordinator.async_write_command(self._plex_description.in_release_payload)
-            except Exception as err:
-                _LOGGER.debug("Precision Plex smart awning close extra release failed safely: %r", err)
+            if transport == "bluetooth":
+                try:
+                    await self.coordinator.async_write_command(self._plex_description.in_release_payload)
+                except Exception as err:
+                    _LOGGER.debug("Precision Plex smart awning close extra release failed safely: %r", err)
 
             if detected_retract_seat or saw_running_current:
                 self._estimated_position = 0.0
@@ -1035,15 +1040,6 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             self._hold_task = None
             self._stop_event = None
             self.async_write_ha_state()
-
-    def _stop_event_cancelled_externally(self) -> bool:
-        """Return whether the current stop event was set by a user stop.
-
-        The smart runner sets its own stop event after detection. This helper is
-        intentionally conservative for now; the explicit Stop button still works
-        because _async_stop_hold_task cancels/waits the runner task.
-        """
-        return False
 
     async def _async_wait_for_awning_current_above(
         self,
@@ -1195,6 +1191,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 stop_event=stop_event,
                 interval_seconds=HOLD_INTERVAL_SECONDS,
                 max_duration_seconds=max_duration_seconds,
+                lin_awning_direction=direction if self._is_awning() else None,
             )
             completed_by_timeout = not stop_event.is_set()
         except Exception as err:

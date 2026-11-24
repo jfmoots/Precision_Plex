@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from homeassistant.components.light import ColorMode, LightEntity
@@ -51,7 +50,6 @@ class PrecisionPlexAwningLight(LightEntity):
         self.entry = entry
         self._attr_unique_id = f"{coordinator.address}_awning_light_control"
         self._remove_listener = None
-        self._command_lock = asyncio.Lock()
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to coordinator updates."""
@@ -85,7 +83,9 @@ class PrecisionPlexAwningLight(LightEntity):
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.available and self.is_on is not None
+        return self.is_on is not None and (
+            self.coordinator.available or self.coordinator.lin.output_control_available
+        )
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -104,11 +104,25 @@ class PrecisionPlexAwningLight(LightEntity):
         return {
             "telemetry_source": self.coordinator.telemetry_source_for("awning_light"),
             "command_mode": "momentary_release_then_press",
-            "command_confirmation_pending": self.coordinator.provisional_state_for("awning_light") is not None,
-            "command_requested_state": self.coordinator.provisional_state_for("awning_light"),
+            "command_transport_preference": "lin",
+            "selected_command_transport": (
+                self.coordinator.preferred_command_transport_for("awning_light")
+            ),
+            "last_command_transport": self.coordinator.last_command_transport_for(
+                "awning_light"
+            ),
+            "command_confirmation_pending": (
+                self.coordinator.provisional_state_for("awning_light") is not None
+            ),
+            "command_requested_state": self.coordinator.provisional_state_for(
+                "awning_light"
+            ),
             "confirmed_state": self._confirmed_is_on,
             "command_confirmation_timeout_seconds": PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
-            "command_channel": "03726f62-6f74-7061-6a61-6d61732e6361",
+            "command_channel": (
+                "lin_pid5e" if self.coordinator.preferred_command_transport_for("awning_light") == "lin"
+                else "ble_gatt_momentary"
+            ),
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -121,22 +135,12 @@ class PrecisionPlexAwningLight(LightEntity):
 
     async def _async_set_desired_state(self, desired_state: bool) -> None:
         """Toggle the momentary button only when the current state differs."""
-        async with self._command_lock:
-            current_state = self.is_on
-
-            if current_state is desired_state:
-                return
-
-            self.coordinator.set_local_provisional_state(
-                "awning_light", desired_state
-            )
-            try:
-                await self.coordinator.async_write_command_sequence(
-                    AWNING_LIGHT_TAP_SEQUENCE,
-                    delay_seconds=TAP_DELAY_SECONDS,
-                    local_toggle_key="awning_light",
-                )
-            except Exception:
-                self.coordinator.clear_local_toggle_intent("awning_light")
-                self.coordinator.clear_provisional_state("awning_light")
-                raise
+        await self.coordinator.async_set_output(
+            "awning_light",
+            desired_state,
+            lambda: self.coordinator.async_write_command_sequence(
+                AWNING_LIGHT_TAP_SEQUENCE,
+                delay_seconds=TAP_DELAY_SECONDS,
+                local_toggle_key="awning_light",
+            ),
+        )
