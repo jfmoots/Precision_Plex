@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
@@ -64,7 +63,6 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
         self._attr_name = cfg["name"]
         self._attr_unique_id = f"{coordinator.address}_{key}_control"
         self._remove_listener = None
-        self._command_lock = asyncio.Lock()
 
     async def async_added_to_hass(self) -> None:
         self._remove_listener = self.coordinator.async_add_listener(
@@ -92,7 +90,9 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.available and self.is_on is not None
+        return self.is_on is not None and (
+            self.coordinator.available or self.coordinator.lin.output_control_available
+        )
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -109,10 +109,28 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
         return {
             "telemetry_source": self.coordinator.telemetry_source_for(self.cfg["state_key"]),
             "command_mode": "state_aware_toggle",
-            "command_confirmation_pending": self.coordinator.provisional_state_for(self.cfg["state_key"]) is not None,
-            "command_requested_state": self.coordinator.provisional_state_for(self.cfg["state_key"]),
+            "command_transport_preference": "lin",
+            "selected_command_transport": (
+                self.coordinator.preferred_command_transport_for(
+                    self.cfg["state_key"]
+                )
+            ),
+            "last_command_transport": self.coordinator.last_command_transport_for(
+                self.cfg["state_key"]
+            ),
+            "command_confirmation_pending": (
+                self.coordinator.provisional_state_for(self.cfg["state_key"])
+                is not None
+            ),
+            "command_requested_state": self.coordinator.provisional_state_for(
+                self.cfg["state_key"]
+            ),
             "confirmed_state": self._confirmed_is_on,
             "command_confirmation_timeout_seconds": PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS,
+            "command_channel": (
+                "lin_pid5e" if self.coordinator.preferred_command_transport_for(self.cfg["state_key"]) == "lin"
+                else "ble_gatt_momentary"
+            ),
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -122,21 +140,11 @@ class PrecisionPlexToggleSwitch(SwitchEntity):
         await self._async_set_desired_state(False)
 
     async def _async_set_desired_state(self, desired_state: bool) -> None:
-        async with self._command_lock:
-            if self.is_on is desired_state:
-                return
-            self.coordinator.set_local_provisional_state(
-                self.cfg["state_key"],
-                desired_state,
-            )
-            try:
-                await self.coordinator.async_write_command(
-                    self.cfg["payload"],
-                    local_toggle_key=self.cfg["state_key"],
-                )
-            except Exception:
-                self.coordinator.clear_local_toggle_intent(
-                    self.cfg["state_key"]
-                )
-                self.coordinator.clear_provisional_state(self.cfg["state_key"])
-                raise
+        key = self.cfg["state_key"]
+        await self.coordinator.async_set_output(
+            key,
+            desired_state,
+            lambda: self.coordinator.async_write_command(
+                self.cfg["payload"], local_toggle_key=key
+            ),
+        )

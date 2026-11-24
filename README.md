@@ -46,7 +46,7 @@ systems.
   the smart Carefree Flip sequence's synthetic 100% open endpoint.
 
 - Prefers a discovered ESPHome Precision Plex LIN bridge for telemetry.
-- Retains Bluetooth as field-level fallback and for all commands.
+- Uses Bluetooth as a telemetry and control fallback.
 - Uses independent 30-second freshness grace periods for rotating LIN sources.
 - Keeps a four-second whole-bridge timeout for genuine communication loss.
 - Observes PID1F touchscreen and PID5E Wireless TP command intent immediately,
@@ -76,14 +76,20 @@ systems.
 - Optional slide quadrature and awning current-sensing enhancements
 
 Generator cumulative runtime now prefers validated LIN PIDBA telemetry with
-Bluetooth fallback. All commands remain on Bluetooth while the LIN command path
-is investigated.
+Bluetooth fallback.
 
 ## Transport behavior
 
 The integration automatically discovers the co-located ESPHome LIN bridge and
 prefers fresh LIN values field by field. If a LIN field is unavailable, the
 integration falls back to Bluetooth where an equivalent value exists.
+
+With bridge firmware v0.6.6 and its native ESPHome actions configured, the patio
+awning, awning light, water heater, and water pump prefer LIN. The smart awning
+uses its motor-current sensor for the Carefree flip. Bluetooth handles a
+command if LIN is unavailable before sending or confirms that it sent
+nothing. An ambiguous result or safety refusal ends the request. Slides and
+generator controls use Bluetooth.
 
 Rotating PIDBA, PID32, PIDEC, and PID37 broadcasts retain their last valid state
 for 30 seconds while the bridge heartbeat remains healthy. If the event

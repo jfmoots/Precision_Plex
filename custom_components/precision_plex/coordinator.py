@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 from bleak import BleakError
@@ -15,6 +15,7 @@ from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
@@ -29,7 +30,7 @@ from .const import (
     DEFAULT_PROFILE_ID,
     get_profile,
 )
-from .lin_transport import PrecisionPlexLinTelemetry
+from .lin_transport import LIN_CONTROL_KEYS, PrecisionPlexLinTelemetry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ STATE_FRAME_MIN_LEN = 4
 STATE_FRAME_MAX_LEN = 20
 PID32_COMMAND_CONFIRMATION_TIMEOUT_SECONDS = 45.0
 LOCAL_TOGGLE_INTENT_MATCH_SECONDS = 5.0
+BLUETOOTH_OUTPUT_MAX_AGE_SECONDS = 10.0
 GENERATOR_COMMAND_FEEDBACK_TIMEOUT_SECONDS = 12.0
 
 _MOTION_OPPOSITES = {
@@ -163,6 +165,8 @@ class PrecisionPlexStateCoordinator:
         self._listeners: list[Callable[[], None]] = []
         self._stopped = False
         self._write_lock = asyncio.Lock()
+        self._preferred_toggle_lock = asyncio.Lock()
+        self._awning_motion_lock = asyncio.Lock()
         self._active_command_streams = 0
         self._start_unsub: Callable[[], None] | None = None
         self._provisional_states: dict[str, bool] = {}
@@ -174,6 +178,7 @@ class PrecisionPlexStateCoordinator:
         self._generator_command_expiry_unsub: Callable[[], None] | None = None
         self._last_lin_command_identity: tuple[str | None, int] | None = None
         self._last_lin_uptime_ms: int | None = None
+        self._last_command_transport: dict[str, str] = {}
         self.lin = PrecisionPlexLinTelemetry(hass, self._handle_lin_update)
 
     async def async_start(self) -> None:
@@ -472,6 +477,75 @@ class PrecisionPlexStateCoordinator:
     def clear_local_toggle_intent(self, key: str) -> None:
         """Forget a local toggle whose transport write did not complete."""
         self._local_toggle_intent_deadlines.pop(key, None)
+
+    def preferred_command_transport_for(self, key: str) -> str:
+        """Return the transport that would be selected for a supported toggle."""
+        return "lin" if key in LIN_CONTROL_KEYS and self.lin.output_control_available else "bluetooth"
+
+    def last_command_transport_for(self, key: str) -> str | None:
+        """Return the transport used for the most recent local command."""
+        return self._last_command_transport.get(key)
+
+    async def async_set_output(
+        self,
+        key: str,
+        desired: bool,
+        write_bluetooth: Callable[[], Awaitable[None]],
+    ) -> None:
+        """Set one of the PID32 outputs through LIN or the existing BLE writer."""
+        async with self._preferred_toggle_lock:
+            if self._stopped:
+                raise HomeAssistantError("Precision Plex coordinator is stopped")
+
+            if self.lin.output_control_available:
+                # Keep the shared command lock until the bridge replies even if
+                # the Home Assistant caller cancels after dispatch.
+                command = asyncio.create_task(self.lin.async_set_output(key, desired))
+                try:
+                    confirmed = await asyncio.shield(command)
+                except asyncio.CancelledError:
+                    with suppress(HomeAssistantError):
+                        await command
+                    raise
+                if confirmed:
+                    self._last_command_transport[key] = "lin"
+                    self.clear_provisional_state(key, notify=False)
+                    self._notify_listeners()
+                    return
+
+            state = self.profile["state_bits"][key]
+            bit = state["bit"]
+            word_index = state.get("word_index", 0)
+            # A BLE toggle needs a known starting state. Recheck after LIN's
+            # explicit not-sent result in case a physical control changed it.
+            if self.lin.output_control_capable:
+                current = self.provisional_state_for(key)
+                if current is None:
+                    current = self.lin.fresh_output_value(key)
+                if (
+                    current is None
+                    and self.available
+                    and word_index < len(self.state_words)
+                    and self.last_valid_02bb_time is not None
+                    and (dt_util.utcnow() - self.last_valid_02bb_time).total_seconds()
+                    <= BLUETOOTH_OUTPUT_MAX_AGE_SECONDS
+                ):
+                    current = bool(self.state_words[word_index] & bit)
+            else:
+                current = self.is_bit_on(bit, word_index)
+            if current is desired:
+                return
+            if current is None:
+                raise HomeAssistantError(f"Cannot toggle {key} without a known output state")
+            self.set_local_provisional_state(key, desired)
+            try:
+                await write_bluetooth()
+                self._last_command_transport[key] = "bluetooth"
+                self._notify_listeners()
+            except (Exception, asyncio.CancelledError):
+                self.clear_local_toggle_intent(key)
+                self.clear_provisional_state(key)
+                raise
 
     @callback
     def set_provisional_states(
@@ -1011,10 +1085,29 @@ class PrecisionPlexStateCoordinator:
         stop_event: asyncio.Event,
         interval_seconds: float = 0.30,
         max_duration_seconds: float = 30.0,
-    ) -> None:
+        *,
+        lin_awning_direction: str | None = None,
+    ) -> str:
         """Send release once, then repeat hold until stopped or max duration expires."""
         if self._stopped:
             raise BleakError("Precision Plex coordinator is stopped")
+
+        if lin_awning_direction is not None:
+            async with self._awning_motion_lock:
+                if stop_event.is_set():
+                    return "stopped"
+                service = self.lin.awning_motion_action
+                if service is not None:
+                    used_lin = await self.lin.async_awning_hold(
+                        service, lin_awning_direction == "out", stop_event, max_duration_seconds
+                    )
+                    if used_lin:
+                        return "lin"
+                if stop_event.is_set():
+                    return "stopped"
+                return await self.async_write_hold_stream(
+                    release_payload, hold_payload, stop_event, interval_seconds, max_duration_seconds
+                )
 
         self._begin_command_stream("hold_stream")
         try:
@@ -1027,6 +1120,7 @@ class PrecisionPlexStateCoordinator:
             )
         finally:
             self._end_command_stream("hold_stream")
+        return "bluetooth"
 
     async def _async_write_hold_stream_locked(
         self,
