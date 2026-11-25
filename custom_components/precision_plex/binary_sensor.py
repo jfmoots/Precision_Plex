@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, STATE_BITS
 from .coordinator import PrecisionPlexStateCoordinator
@@ -28,6 +29,7 @@ async def async_setup_entry(
     ]
     entities.append(PrecisionPlexGeneratorRunningBinarySensor(coordinator, entry))
     entities.append(PrecisionPlexBleConnectedBinarySensor(coordinator, entry))
+    entities.append(PrecisionPlexLinCommandProblem(coordinator))
     entities.extend(
         PrecisionPlexLinOnlyBinarySensor(coordinator, entry, key, name, device_class)
         for key, name, device_class in (
@@ -47,6 +49,44 @@ async def async_setup_entry(
         )
     )
     async_add_entities(entities)
+
+
+class PrecisionPlexLinCommandProblem(BinarySensorEntity, RestoreEntity):
+    """A dashboard-ready problem sensor for the LIN command path."""
+
+    _attr_has_entity_name = True
+    _attr_name = "LIN Command Path Problem"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: PrecisionPlexStateCoordinator) -> None:
+        self.coordinator = coordinator
+        self._attr_unique_id = f"{coordinator.address}_lin_command_path_problem"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, coordinator.address)},
+            "connections": {(CONNECTION_BLUETOOTH, coordinator.address)},
+            "name": "Precision Plex",
+            "manufacturer": "Precision Circuits",
+        }
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        previous = await self.async_get_last_state()
+        if previous is not None and previous.state in ("on", "off"):
+            self.coordinator.lin_commands_expected = True
+        self.async_on_remove(self.coordinator.async_add_listener(self.async_write_ha_state))
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.lin_command_path_down is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator.lin_command_path_down
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"missing_command_paths": list(self.coordinator.lin.missing_command_paths)}
 
 
 class PrecisionPlexLinOnlyBinarySensor(BinarySensorEntity):

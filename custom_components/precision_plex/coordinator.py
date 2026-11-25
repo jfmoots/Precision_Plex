@@ -166,6 +166,9 @@ class PrecisionPlexStateCoordinator:
         self._stopped = False
         self._write_lock = asyncio.Lock()
         self._preferred_toggle_lock = asyncio.Lock()
+        self.generator_command_lock = asyncio.Lock()
+        self.lin_commands_expected = False
+        self.lin_command_path_down: bool | None = None
         self._lin_motion_lock = asyncio.Lock()
         self._active_command_streams = 0
         self._start_unsub: Callable[[], None] | None = None
@@ -886,48 +889,65 @@ class PrecisionPlexStateCoordinator:
             self._active_command_streams,
         )
 
+    @callback
+    def _refresh_lin_command_health(self) -> bool:
+        """Track command-path transitions and report whether LIN can own control."""
+        missing = self.lin.missing_command_paths
+        if self.lin.full_command_support:
+            self.lin_commands_expected = True
+        if not self.lin_commands_expected:
+            return False
+
+        down = bool(missing)
+        previous = self.lin_command_path_down
+        if previous != down:
+            self.lin_command_path_down = down
+            if down:
+                _LOGGER.warning(
+                    "Precision Plex LIN command path down; Bluetooth fallback required for %s",
+                    ", ".join(missing),
+                )
+            elif previous is True:
+                _LOGGER.warning("Precision Plex LIN command path recovered; releasing Bluetooth")
+            self._notify_listeners()
+        return not down
+
     async def _connection_loop(self) -> None:
-        """Keep a read-only BLE subscription active."""
+        """Keep Bluetooth available only while the LIN command path needs fallback."""
         try:
             while not self._stopped:
+                failed = False
                 try:
-                    if self.command_stream_active:
-                        _LOGGER.debug("Precision Plex monitor waiting while command stream owns BLE")
-                        while self.command_stream_active and not self._stopped:
-                            await asyncio.sleep(0.25)
-                        if self._stopped:
-                            break
-
-                    await self._connect_and_subscribe()
-
-                    while (
-                        not self._stopped
-                        and self._client is not None
-                        and self._client.is_connected
-                    ):
-                        await asyncio.sleep(1)
-
+                    self._refresh_lin_command_health()
+                    if not self.command_stream_active:
+                        async with self._write_lock:
+                            # A hold stream can acquire ownership while the monitor waits.
+                            if not self.command_stream_active:
+                                if self._refresh_lin_command_health():
+                                    if self._client is not None:
+                                        await self._async_disconnect()
+                                        self.available = False
+                                        self._notify_listeners()
+                                elif not self.ble_connected:
+                                    await self._connect_and_subscribe()
                 except asyncio.CancelledError:
                     raise
                 except BLE_EXCEPTIONS as err:
                     self.available = False
                     _LOGGER.debug("Precision Plex monitor BLE error: %r", err)
                     self._notify_listeners()
+                    failed = True
                 except Exception as err:
                     self.available = False
                     _LOGGER.warning("Precision Plex monitor unexpected error: %r", err)
                     self._notify_listeners()
+                    failed = True
 
-                if self.command_stream_active:
-                    _LOGGER.info("Precision Plex monitor reconnect deferred while command stream owns BLE")
-                    while self.command_stream_active and not self._stopped:
-                        await asyncio.sleep(0.25)
-
-                await self._async_disconnect()
-
-                if not self._stopped:
-                    await asyncio.sleep(RECONNECT_DELAY_SECONDS)
-
+                if failed and not self.command_stream_active:
+                    async with self._write_lock:
+                        if not self.command_stream_active and not self.available:
+                            await self._async_disconnect()
+                await asyncio.sleep(RECONNECT_DELAY_SECONDS if failed else 1.0)
         finally:
             await self._async_disconnect()
             self.available = False

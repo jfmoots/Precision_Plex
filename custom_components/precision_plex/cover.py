@@ -429,8 +429,12 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         """Return availability."""
         out_desc = STATE_BITS[self._plex_description.out_state_key]
         in_desc = STATE_BITS[self._plex_description.in_state_key]
+        key = self._lin_motion_key()
+        command_available = self.coordinator.available or (
+            key is not None and self.coordinator.lin.motion_action(key) is not None
+        )
         return (
-            self.coordinator.available
+            command_available
             and self.coordinator.is_bit_on(out_desc["bit"], out_desc.get("word_index", 0)) is not None
             and self.coordinator.is_bit_on(in_desc["bit"], in_desc.get("word_index", 0)) is not None
         )
