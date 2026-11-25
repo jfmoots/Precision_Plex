@@ -91,6 +91,160 @@ class TestLinRecovery(unittest.TestCase):
         self.assertFalse(lin.snapshot_fresh)
 
 
+class TestLinCommandPathAlert(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.now = 100.0
+        self.services = SimpleNamespace(has_service=Mock(return_value=True))
+        self.hass = SimpleNamespace(services=self.services, loop=asyncio.get_running_loop())
+        entry = SimpleNamespace(
+            data={"address": "00:00:00:00:00:01"},
+            options={coordinator.CONF_LIN_BRIDGE_ID: "coach-a"},
+        )
+        self.plex = coordinator.PrecisionPlexStateCoordinator(self.hass, entry)
+        self.lin = self.plex.lin
+        self.alert_timer = Mock(side_effect=lambda *_: Mock())
+        for patched in (
+            patch.object(lin_transport, "time", SimpleNamespace(monotonic=lambda: self.now)),
+            patch.object(lin_transport, "async_call_later", return_value=Mock()),
+            patch.object(coordinator, "async_call_later", self.alert_timer),
+        ):
+            patched.start()
+            self.addCleanup(patched.stop)
+        self.send_snapshot()
+        self.assertEqual(self.plex.lin_command_problems, {"bridge": (), "generator": (), "outputs": ()})
+
+    def send_snapshot(self, *, reason="periodic_full", **values):
+        defaults = {
+            "outputs_active": True,
+            "output_control_capable": True,
+            "generator_command_capable": True,
+            **{f"{key}_motion_capable": True for key in lin_transport.LIN_MOTION_KEYS},
+            **values,
+        }
+        self.lin._handle_snapshot(
+            snapshot("coach-a", reason=reason, uptime=int(self.now * 1000), **defaults)
+        )
+
+    def fire_alert_timer(self, index=0):
+        hass, delay, confirm = self.alert_timer.call_args_list[index].args
+        self.assertIs(hass, self.hass)
+        self.assertEqual(delay, coordinator.LIN_FEEDBACK_ALERT_DELAY_SECONDS)
+        confirm(None)
+
+    async def test_transient_generator_gap_does_not_flag_bridge_or_slide_path(self):
+        self.now += 2
+        self.send_snapshot(reason="heartbeat", telemetry_active=False)
+        self.assertEqual(self.lin.command_path_problems["generator"], ("PIDBA generator feedback stale",))
+        self.assertIsNone(self.lin.generator_action)
+        self.assertIsNotNone(self.lin.motion_action("wardrobe_slide"))
+        self.assertFalse(self.plex._refresh_lin_command_health())
+        self.assertEqual(self.plex.lin_command_problems, {"bridge": (), "generator": (), "outputs": ()})
+
+        cancel = self.plex._lin_command_alert_unsubs["generator"]
+        self.now += 2
+        self.send_snapshot(reason="heartbeat")
+        self.alert_timer.assert_called_once()
+        cancel.assert_called_once()
+        self.assertTrue(self.plex._refresh_lin_command_health())
+        self.assertEqual(self.plex.lin_command_problems, {"bridge": (), "generator": (), "outputs": ()})
+
+    async def test_transient_output_gap_does_not_raise_alert_or_enable_motion(self):
+        self.now += 2
+        self.send_snapshot(reason="heartbeat", outputs_active=False)
+        self.assertTrue(self.lin.snapshot_fresh)
+        self.assertEqual(self.lin.command_path_problems["outputs"], ("PID32 output feedback stale",))
+        self.assertIsNotNone(self.lin.generator_action)
+        self.assertIsNone(self.lin.motion_action("wardrobe_slide"))
+        self.assertEqual(self.plex.lin_command_problems["outputs"], ())
+        cancel = self.plex._lin_command_alert_unsubs["outputs"]
+        self.now += 2
+        self.send_snapshot(reason="heartbeat", outputs_active=False)
+        self.alert_timer.assert_called_once()
+
+        self.now += 2
+        self.send_snapshot(reason="heartbeat")
+        cancel.assert_called_once()
+        self.assertEqual(self.plex.lin_command_problems["outputs"], ())
+
+    async def test_bridge_heartbeat_expiry_alerts_without_extra_feedback_delay(self):
+        self.now += lin_transport.SNAPSHOT_MAX_AGE_SECONDS + 0.1
+        self.lin._handle_snapshot_expired(None)
+        self.assertEqual(self.plex.lin_command_problems, {
+            "bridge": ("LIN bridge heartbeat",), "generator": None, "outputs": None,
+        })
+        self.alert_timer.assert_not_called()
+
+        self.send_snapshot(reason="heartbeat")
+        self.assertEqual(self.plex.lin_command_problems, {"bridge": (), "generator": (), "outputs": ()})
+
+    async def test_expected_bridge_has_one_heartbeat_window_at_startup(self):
+        startup = coordinator.PrecisionPlexStateCoordinator(self.hass, self.plex.entry)
+        startup.lin_commands_expected = True
+        self.assertFalse(startup._refresh_lin_command_health())
+        self.assertIsNone(startup.lin_command_problems["bridge"])
+        self.alert_timer.assert_called_once()
+        hass, delay, confirm = self.alert_timer.call_args.args
+        self.assertIs(hass, self.hass)
+        self.assertEqual(delay, lin_transport.SNAPSHOT_MAX_AGE_SECONDS)
+        self.now += delay
+        confirm(None)
+        self.assertEqual(startup.lin_command_problems["bridge"], ("LIN bridge heartbeat",))
+
+    async def test_inactive_bus_is_distinct_from_missing_heartbeat(self):
+        self.now += 2
+        self.send_snapshot(reason="heartbeat", telemetry_active=False)
+        cancel = self.plex._lin_command_alert_unsubs["generator"]
+        self.now += 2
+        self.send_snapshot(reason="heartbeat", bus_active=False)
+        self.assertTrue(self.lin.snapshot_fresh)
+        self.assertEqual(self.plex.lin_command_problems, {
+            "bridge": ("LIN bus traffic",), "generator": None, "outputs": None,
+        })
+        cancel.assert_called_once()
+        self.alert_timer.assert_called_once()
+
+    async def test_feedback_alerts_have_independent_confirmation_windows(self):
+        self.now += 2
+        self.send_snapshot(reason="heartbeat", telemetry_active=False)
+        self.now += 2
+        self.send_snapshot(reason="heartbeat", telemetry_active=False, outputs_active=False)
+        for _ in range(2):
+            self.now += 2
+            self.send_snapshot(reason="heartbeat", telemetry_active=False, outputs_active=False)
+        self.fire_alert_timer()
+        self.assertEqual(self.plex.lin_command_problems, {
+            "bridge": (), "generator": ("PIDBA generator feedback stale",), "outputs": (),
+        })
+
+        self.now += 2
+        self.send_snapshot(reason="heartbeat", outputs_active=False)
+        self.fire_alert_timer(index=1)
+        self.assertEqual(self.plex.lin_command_problems, {
+            "bridge": (), "generator": (), "outputs": ("PID32 output feedback stale",),
+        })
+
+    async def test_unchanged_heartbeats_track_missing_and_restored_actions(self):
+        self.services.has_service.side_effect = (
+            lambda _domain, name: not name.endswith("_wardrobe_slide_motion")
+        )
+        self.now += 2
+        self.send_snapshot(reason="heartbeat")
+        self.assertEqual(self.lin.command_path_problems["outputs"], ("wardrobe_slide",))
+        self.assertEqual(self.plex.lin_command_problems["outputs"], ())
+        for _ in range(3):
+            self.now += 2
+            self.send_snapshot(reason="heartbeat")
+        self.fire_alert_timer()
+        self.assertEqual(self.plex.lin_command_problems, {
+            "bridge": (), "generator": (), "outputs": ("wardrobe_slide",),
+        })
+
+        self.services.has_service.side_effect = None
+        self.now += 2
+        self.send_snapshot(reason="heartbeat")
+        self.assertEqual(self.plex.lin_command_problems, {"bridge": (), "generator": (), "outputs": ()})
+
+
 class TestMotionCompletion(unittest.IsolatedAsyncioTestCase):
     def make_coordinator(self):
         plex = object.__new__(coordinator.PrecisionPlexStateCoordinator)
