@@ -22,6 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 LIN_SNAPSHOT_EVENT = "esphome.precision_plex_lin_snapshot"
 SNAPSHOT_MAX_AGE_SECONDS = 4.0
 OUTPUT_COMMAND_TIMEOUT_SECONDS = 7.0
+LIN_MOTION_KEYS = ("awning", "bedroom_slide", "sofa_slide", "wardrobe_slide")
 LIN_CONTROL_KEYS = frozenset({"awning_light", "water_heater", "water_pump"})
 SOURCE_GRACE_SECONDS = 30.0
 COMMAND_INTENT_MAX_AGE_MS = 5000
@@ -141,7 +142,7 @@ class PrecisionPlexLinTelemetry:
         self.bridge_id: str | None = None
         self._legacy_initial_command_identity: tuple[str, int] | None = None
         self._last_uptime_ms: int | None = None
-        self._output_waiters: dict[tuple[str, str], asyncio.Future[str]] = {}
+        self._command_waiters: dict[tuple[str | None, str], asyncio.Future[str]] = {}
 
     @callback
     def start(self) -> None:
@@ -170,9 +171,9 @@ class PrecisionPlexLinTelemetry:
             if self._unsub_source_expiry[source] is not None:
                 self._unsub_source_expiry[source]()
                 self._unsub_source_expiry[source] = None
-        for waiter in self._output_waiters.values():
+        for waiter in self._command_waiters.values():
             waiter.cancel()
-        self._output_waiters.clear()
+        self._command_waiters.clear()
         self.entity_ids.clear()
         self.command_entity_ids.clear()
         self.device_id = None
@@ -269,12 +270,13 @@ class PrecisionPlexLinTelemetry:
             SNAPSHOT_MAX_AGE_SECONDS,
             self._handle_snapshot_expired,
         )
-        request_id = payload.get("output_request_id")
-        status = payload.get("output_request_status")
-        if isinstance(request_id, str) and isinstance(status, str):
-            waiter = self._output_waiters.get((bridge_id, request_id))
-            if waiter is not None and not waiter.done():
-                waiter.set_result(status)
+        for command in ("output", "generator"):
+            request_id = payload.get(f"{command}_request_id")
+            status = payload.get(f"{command}_request_status")
+            if isinstance(request_id, str) and isinstance(status, str):
+                waiter = self._command_waiters.get((bridge_id, request_id))
+                if waiter is not None and not waiter.done():
+                    waiter.set_result(status)
         if meaningful_changed or bridge_changed:
             self._listener()
 
@@ -318,16 +320,65 @@ class PrecisionPlexLinTelemetry:
         if service is None or bridge_id is None or key not in LIN_CONTROL_KEYS:
             return False
 
+        return await self._async_send_command(
+            service, key, {"output_key": key, "desired_state": desired}, {"confirmed"}
+        )
+
+    @property
+    def generator_action(self) -> str | None:
+        """Find the generator action on a live, capable LIN bridge."""
+        if (
+            not self.snapshot_fresh
+            or self._snapshot.get("generator_command_capable") is not True
+            or self._snapshot.get("telemetry_active") is not True
+            or self.bridge_id in (None, "unknown")
+        ):
+            return None
+        service = f"{slugify(self.bridge_id)}_precision_plex_generator_command"
+        return service if self.hass.services.has_service("esphome", service) else None
+
+    @property
+    def full_command_support(self) -> bool:
+        """Return whether the bridge firmware advertises the complete command set."""
+        return (
+            self._snapshot.get("generator_command_capable") is True
+            and self._snapshot.get("output_control_capable") is True
+            and all(self._snapshot.get(f"{key}_motion_capable") is True for key in LIN_MOTION_KEYS)
+        )
+
+    @property
+    def missing_command_paths(self) -> tuple[str, ...]:
+        """Return which command paths currently require Bluetooth."""
+        if not self.snapshot_fresh or self._snapshot.get("bus_active") is not True:
+            return ("LIN bridge or bus",)
+        missing = []
+        if not self.output_control_available:
+            missing.append("outputs")
+        if self.generator_action is None:
+            missing.append("generator")
+        missing.extend(key for key in LIN_MOTION_KEYS if self.motion_action(key) is None)
+        return tuple(missing)
+
+    async def async_generator_command(self, key: str) -> bool:
+        """Confirm acceptance through PIDBA, with fallback only if nothing was sent."""
+        service = self.generator_action
+        if service is None:
+            return False
+        return await self._async_send_command(
+            service, key, {"command_key": key}, {"accepted", "sent_idle"}
+        )
+
+    async def _async_send_command(
+        self, service: str, key: str, data: dict[str, Any], success: set[str]
+    ) -> bool:
         request_id = uuid4().hex
-        request = (bridge_id, request_id)
+        request = (self.bridge_id, request_id)
         future = asyncio.get_running_loop().create_future()
-        self._output_waiters[request] = future
+        self._command_waiters[request] = future
+
         async def dispatch() -> str:
             await self.hass.services.async_call(
-                "esphome",
-                service,
-                {"output_key": key, "desired_state": desired, "request_id": request_id},
-                blocking=True,
+                "esphome", service, {**data, "request_id": request_id}, blocking=True
             )
             return await future
 
@@ -335,19 +386,19 @@ class PrecisionPlexLinTelemetry:
             status = await asyncio.wait_for(dispatch(), timeout=OUTPUT_COMMAND_TIMEOUT_SECONDS)
         except (asyncio.TimeoutError, HomeAssistantError) as err:
             raise HomeAssistantError(
-                f"LIN command outcome for {key} is unknown. Check the reported output state."
+                f"LIN command outcome for {key} is unknown. Check the reported state."
             ) from err
         finally:
-            self._output_waiters.pop(request, None)
+            self._command_waiters.pop(request, None)
             if not future.done():
                 future.cancel()
 
-        if status == "confirmed":
+        if status in success:
             return True
         if status == "not_sent":
             return False
         raise HomeAssistantError(
-            f"LIN command for {key} reported {status}. Check the reported output state."
+            f"LIN command for {key} reported {status}. Check the reported state."
         )
 
     def motion_action(self, key: str) -> str | None:

@@ -179,7 +179,7 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
         self.cfg = cfg
         self._attr_name = cfg["name"]
         self._attr_unique_id = f"{coordinator.address}_{key}"
-        self._command_lock = asyncio.Lock()
+        self._command_lock = coordinator.generator_command_lock
         self._remove_listener = None
         self._last_available: bool | None = None
 
@@ -207,8 +207,8 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Keep command buttons stable while the BLE command path is connected."""
-        return self.coordinator.ble_connected
+        """Expose commands when either transport can send them."""
+        return self.coordinator.lin.generator_action is not None or self.coordinator.ble_connected
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -243,11 +243,17 @@ class PrecisionPlexGeneratorButton(ButtonEntity):
                 self.cfg["pending_status"], self.cfg["confirmation_keys"]
             )
             try:
+                if await self.coordinator.lin.async_generator_command(self.key):
+                    self.coordinator.clear_generator_command_pending()
+                    return
+                if self.coordinator.generator_status_key_value not in self.cfg["allowed_status_keys"]:
+                    self.coordinator.clear_generator_command_pending()
+                    _LOGGER.warning("%s", self.cfg["blocked_message"])
+                    return
                 await self.coordinator.async_write_command_sequence(
-                    self.cfg["sequence"],
-                    delay_seconds=0.25,
+                    self.cfg["sequence"], delay_seconds=0.25
                 )
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 self.coordinator.clear_generator_command_pending()
                 raise
 
@@ -295,7 +301,8 @@ class PrecisionPlexCoverUtilityButton(ButtonEntity):
         """Return availability."""
         if self._plex_description.action.startswith("reset_"):
             return True
-        return self.coordinator.available and self._cover is not None
+        cover = self._cover
+        return cover is not None and cover.available
 
     @property
     def _cover(self):
