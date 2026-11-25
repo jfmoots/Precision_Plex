@@ -121,6 +121,8 @@ class TestMotionCompletion(unittest.IsolatedAsyncioTestCase):
             _set_provisional_motion=Mock(),
             async_write_ha_state=Mock(),
             _estimated_position=42.0,
+            _signed_retracted_counts=None,
+            _signed_extended_counts=None,
         )
         return entity
 

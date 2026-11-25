@@ -1,5 +1,11 @@
 # Changelog
 
+## v5.5.21 - Signed Slide Encoder Position
+
+- Calibrates the bedroom, sofa, and wardrobe slide positions from both signed motor counts.
+- Uses each slide's confirmed retracted and extended readings to align the motors.
+- Preserves legacy telemetry and calibration until both signed endpoints are recorded.
+
 ## v5.5.20 - Motion Completion and LIN Recovery
 
 - Preserves slide calibration when a motion request fails, stops early, or reports no movement.

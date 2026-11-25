@@ -5,8 +5,9 @@ systems.
 
 ## Current release
 
-**v5.5.20 - Motion Completion and LIN Recovery**
+**v5.5.21 - Signed Slide Encoder Position**
 
+- Calibrates slide position through zero crossings using both signed motor encoders.
 - Uses reported transport outcomes and encoder movement to protect learned slide endpoints.
 - Refreshes entities when the LIN heartbeat recovers after an outage.
 - Adds an ESPHome LIN bridge ID setting for installations with multiple coaches or bridges.
@@ -102,6 +103,18 @@ Model_Georgetown_GT_34M5_w_2AC
 ```
 
 Other coaches may use different circuits, commands, tanks, slides, or profiles.
+
+## Slide encoder calibration
+
+With individual ESPHome motor encoder entities available, teach each slide
+its two physical endpoints. At full retraction, press its **Reset Fully
+Retracted** button. At full extension, press **Reset Fully Extended**. Allow
+the motor counts to settle before pressing either calibration button.
+
+The integration uses both signed motor counts once it has both readings.
+It infers each motor's direction from the two endpoints and retains the
+calibration across Home Assistant restarts. Existing installations continue
+using their prior travel sensor until signed calibration is complete.
 
 ## Diagnostics
 

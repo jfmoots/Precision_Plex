@@ -10,9 +10,10 @@ from typing import Any
 
 from homeassistant.components.cover import CoverDeviceClass, CoverEntity, CoverEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, State, callback
+from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
@@ -37,6 +38,12 @@ from .const import (
 )
 from .coordinator import PrecisionPlexStateCoordinator
 from .motion import MotionEnd
+from .slide_encoder import (
+    MIN_ENCODER_TRAVEL,
+    MotorCounts,
+    SlideEncoderCalibration,
+    parse_motor_counts,
+)
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -56,7 +63,7 @@ AWNING_RESTORE_ENDPOINT_SNAP_PERCENT = 10.0
 # abort the stream. This prevents spamming BLE commands when a downstream
 # interlock, such as ignition lockout, accepts commands but prevents motion.
 MOTION_VERIFICATION_SECONDS = 3.0
-MOTION_VERIFICATION_MIN_DELTA_COUNTS = 25.0
+MOTION_VERIFICATION_MIN_DELTA_COUNTS = MIN_ENCODER_TRAVEL
 
 SLIDE_PULSE_TELEMETRY: dict[str, dict[str, Any]] = {
     "bed_slide": {
@@ -256,6 +263,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             self._attr_device_class = CoverDeviceClass.AWNING
         self._remove_listener = None
         self._remove_awning_endpoint_listener = None
+        self._remove_motor_listener = None
         self._command_lock = asyncio.Lock()
         self._hold_task: asyncio.Task | None = None
         self._stop_event: asyncio.Event | None = None
@@ -269,6 +277,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._quadrature_available = False
         self._quadrature_retracted_total = 0.0
         self._quadrature_extended_total: float | None = None
+        self._signed_retracted_counts: MotorCounts | None = None
+        self._signed_extended_counts: MotorCounts | None = None
+        self._motor_entity_ids: dict[str, str] = {}
         # When the controller state bit drops, the ESPHome sensor update can lag
         # by a second or two. Keep applying pulse deltas briefly after motion
         # stops so the final encoder pulses are not missed.
@@ -300,6 +311,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._remove_listener = self.coordinator.async_add_listener(
             self._handle_coordinator_update
         )
+        self._subscribe_signed_motor_counts()
         if self._is_awning():
             self._remove_awning_endpoint_listener = self.hass.bus.async_listen(
                 "state_changed", self._handle_awning_endpoint_event
@@ -313,6 +325,12 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             return
 
         if self._supports_pulse_telemetry():
+            self._signed_retracted_counts = parse_motor_counts(
+                last_state.attributes.get("quadrature_signed_retracted_counts")
+            )
+            self._signed_extended_counts = parse_motor_counts(
+                last_state.attributes.get("quadrature_signed_extended_counts")
+            )
             try:
                 self._quadrature_retracted_total = float(
                     last_state.attributes.get("quadrature_retracted_total", 0.0)
@@ -384,6 +402,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
     async def async_will_remove_from_hass(self) -> None:
         """Stop stream and unsubscribe."""
         await self._async_stop_hold_task()
+        if self._remove_motor_listener is not None:
+            self._remove_motor_listener()
+            self._remove_motor_listener = None
         if self._remove_listener is not None:
             self._remove_listener()
             self._remove_listener = None
@@ -393,8 +414,26 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Handle updated BLE state."""
+        """Update motion and attach any newly discovered motor sensors."""
+        self._subscribe_signed_motor_counts()
         self._sync_motion_from_state()
+        self.async_write_ha_state()
+
+    @callback
+    def _subscribe_signed_motor_counts(self) -> None:
+        """Refresh calibrated position on raw motor updates as well as LIN events."""
+        if self._remove_motor_listener is not None or self._signed_calibration() is None:
+            return
+        for key in ("motor_1", "motor_2"):
+            self._find_telemetry_state(key)
+        if len(self._motor_entity_ids) == 2:
+            self._remove_motor_listener = async_track_state_change_event(
+                self.hass, list(self._motor_entity_ids.values()), self._handle_signed_motor_update
+            )
+
+    @callback
+    def _handle_signed_motor_update(self, _event: Event) -> None:
+        """Refresh the position when an ESPHome motor encoder changes."""
         self.async_write_ha_state()
 
     @callback
@@ -512,6 +551,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 }
             )
         if self._supports_pulse_telemetry():
+            signed_calibration = self._signed_calibration()
             quadrature_travel_total = self._read_quadrature_travel_total()
             quadrature_sync_error = self._read_quadrature_sync_error()
             attrs.update(
@@ -524,8 +564,12 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                         else None
                     ),
                     "quadrature_calibrated": (
-                        self._quadrature_extended_total is not None
+                        signed_calibration is not None
+                        or self._quadrature_extended_total is not None
                     ),
+                    "quadrature_signed_calibrated": signed_calibration is not None,
+                    "quadrature_signed_retracted_counts": self._signed_retracted_counts,
+                    "quadrature_signed_extended_counts": self._signed_extended_counts,
                     "quadrature_retracted_total": round(
                         self._quadrature_retracted_total, 1
                     ),
@@ -663,8 +707,14 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             self._pulse_settle_until = None
             target_position = max(0.0, min(100.0, float(position)))
             current_total = self._read_quadrature_travel_total()
+            motor_counts = self._read_signed_motor_counts()
 
-            if self._supports_pulse_telemetry() and current_total is not None:
+            if motor_counts is not None:
+                if not self._learn_signed_endpoint(target_position, motor_counts):
+                    return
+                self._subscribe_signed_motor_counts()
+                current_total = self._read_quadrature_travel_total()
+            elif self._supports_pulse_telemetry() and current_total is not None:
                 if not self._calibrate_quadrature_endpoint(
                     target_position, current_total
                 ):
@@ -677,6 +727,24 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 "quadrature_calibrated" if current_total is not None else "time"
             )
             self.async_write_ha_state()
+
+    def _learn_signed_endpoint(self, position: float, counts: MotorCounts) -> bool:
+        """Save a physically confirmed endpoint without guessing motor polarity."""
+        retracted = counts if position <= 1.0 else self._signed_retracted_counts
+        extended = counts if position >= 99.0 else self._signed_extended_counts
+        if (
+            retracted is not None
+            and extended is not None
+            and not SlideEncoderCalibration(retracted, extended).valid
+        ):
+            _LOGGER.warning(
+                "Precision Plex %s signed encoder calibration requires movement at both motors",
+                self._plex_description.key,
+            )
+            return False
+        self._signed_retracted_counts = retracted
+        self._signed_extended_counts = extended
+        return True
 
     def _calibrate_quadrature_endpoint(
         self, target_position: float, current_total: float
@@ -1231,11 +1299,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
             self._update_estimated_position()
 
-            # A successful native full-open/full-close command is authoritative.
-            # Learn the live quadrature endpoint before snapping so the next
-            # telemetry refresh cannot overwrite 100%/0% with the old count.
-            # Jog and intermediate-position commands do not pass an endpoint.
-            if completed and target_endpoint is not None:
+            # Keep the signed endpoints set by the operator. Legacy encoders
+            # retain the existing endpoint learning after a completed full hold.
+            if completed and target_endpoint is not None and self._signed_calibration() is None:
                 current_total = self._read_quadrature_travel_total()
                 if start_total is None and current_total is None:
                     self._estimated_position = target_endpoint
@@ -1276,8 +1342,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         if max_duration_seconds < MOTION_VERIFICATION_SECONDS:
             return
 
-        start_total = self._read_quadrature_travel_total()
-        if start_total is None:
+        start_counts = self._read_signed_motor_counts()
+        start_total = self._read_quadrature_travel_total() if start_counts is None else None
+        if start_counts is None and start_total is None:
             return
 
         try:
@@ -1292,11 +1359,17 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         if stop_event.is_set():
             return
 
-        current_total = self._read_quadrature_travel_total()
-        if current_total is None:
-            return
+        if start_counts is not None:
+            current_counts = self._read_signed_motor_counts()
+            if current_counts is None:
+                return
+            delta = sum(abs(end - start) for start, end in zip(start_counts, current_counts)) / 2
+        else:
+            current_total = self._read_quadrature_travel_total()
+            if current_total is None or start_total is None:
+                return
+            delta = abs(current_total - start_total)
 
-        delta = abs(current_total - start_total)
         if delta >= MOTION_VERIFICATION_MIN_DELTA_COUNTS:
             self._motion_verification_failed = False
             self._motion_verification_reason = None
@@ -1310,11 +1383,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
         _LOGGER.info(
             "Precision Plex %s command aborted: no quadrature movement detected "
-            "after %.1f seconds (start=%.1f current=%.1f delta=%.1f)",
+            "after %.1f seconds (delta=%.1f counts)",
             self._plex_description.key,
             MOTION_VERIFICATION_SECONDS,
-            start_total,
-            current_total,
             delta,
         )
 
@@ -1546,7 +1617,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             self._last_quadrature_delta = None
 
         self._last_quadrature_total = current_total
-        position_total = current_total - self._quadrature_retracted_total
+        position_total = current_total
+        if self._signed_calibration() is None:
+            position_total -= self._quadrature_retracted_total
         self._estimated_position = max(
             0.0,
             min(100.0, (position_total / full_travel) * 100.0),
@@ -1662,13 +1735,41 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         """Return cumulative slide travel pulses from ESPHome, if present."""
         if not self._supports_pulse_telemetry():
             return None
+        calibration = self._signed_calibration()
+        if calibration is not None:
+            counts = self._read_signed_motor_counts()
+            return sum(calibration.travel(counts)) / 2 if counts is not None else None
         return self._read_float_state("travel_pulses")
 
     def _read_quadrature_sync_error(self) -> float | None:
         """Return slide motor sync error from ESPHome, if present."""
         if not self._supports_pulse_telemetry():
             return None
+        calibration = self._signed_calibration()
+        if calibration is not None:
+            counts = self._read_signed_motor_counts()
+            if counts is None:
+                return None
+            first, second = calibration.travel(counts)
+            return abs(first - second)
         return self._read_float_state("sync_error")
+
+    def _signed_calibration(self) -> SlideEncoderCalibration | None:
+        """Return a complete, usable signed encoder calibration."""
+        if self._signed_retracted_counts is None or self._signed_extended_counts is None:
+            return None
+        calibration = SlideEncoderCalibration(
+            self._signed_retracted_counts, self._signed_extended_counts
+        )
+        return calibration if calibration.valid else None
+
+    def _read_signed_motor_counts(self) -> MotorCounts | None:
+        """Read the two raw ESPHome encoder entities, without absolute values."""
+        if not self._supports_pulse_telemetry() or self.hass is None:
+            return None
+        return parse_motor_counts(
+            tuple(self._read_float_state(key) for key in ("motor_1", "motor_2"))
+        )
 
     def _read_float_state(self, telemetry_key: str) -> float | None:
         """Read a numeric Home Assistant state by candidate entity IDs or friendly name."""
@@ -1709,6 +1810,22 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
         friendly_names = config.get("friendly_names", {})
         friendly_name = friendly_names.get(telemetry_key)
+        if telemetry_key in ("motor_1", "motor_2"):
+            cached_id = self._motor_entity_ids.get(telemetry_key)
+            if cached_id is not None:
+                state = self.hass.states.get(cached_id)
+                if state is not None:
+                    return None if state.state in invalid_states else state
+            slide_name = friendly_names["travel_pulses"].removesuffix(" Quadrature Travel")
+            motor = telemetry_key.removeprefix("motor_")
+            friendly_name = f"{slide_name} Motor {motor} Quadrature"
+            suffix = friendly_name.lower().replace(" ", "_")
+            for state in self.hass.states.async_all("sensor"):
+                actual_name = str(state.attributes.get("friendly_name", ""))
+                if state.entity_id.endswith(suffix) or actual_name.endswith(friendly_name):
+                    self._motor_entity_ids[telemetry_key] = state.entity_id
+                    return None if state.state in invalid_states else state
+            return None
         if friendly_name is None:
             return None
 
@@ -1746,6 +1863,9 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
     def _quadrature_full_travel(self) -> float:
         """Return configured full-travel pulse count for this slide."""
+        calibration = self._signed_calibration()
+        if calibration is not None:
+            return calibration.full_travel
         if self._quadrature_extended_total is not None:
             calibrated_span = (
                 self._quadrature_extended_total - self._quadrature_retracted_total
