@@ -32,7 +32,7 @@ from .const import (
     DEFAULT_PROFILE_ID,
     get_profile,
 )
-from .lin_transport import LIN_CONTROL_KEYS, PrecisionPlexLinTelemetry
+from .lin_transport import LIN_CONTROL_KEYS, SNAPSHOT_MAX_AGE_SECONDS, PrecisionPlexLinTelemetry
 from .motion import MotionEnd, MotionResult
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,6 +40,7 @@ _LOGGER = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 12.0
 GATT_TIMEOUT = 8.0
 RECONNECT_DELAY_SECONDS = 4.0
+LIN_FEEDBACK_ALERT_DELAY_SECONDS = 6.0
 GENERATOR_RUNTIME_MAX_PLAUSIBLE_TENTHS = 10000  # 1000.0 hours; protects against misdecoded 02AA frames
 GENERATOR_RUNTIME_MAX_JUMP_TENTHS = 50  # 5.0 hours between accepted samples is implausible for live telemetry
 COACH_VOLTAGE_MIN_TENTHS = 100
@@ -171,7 +172,12 @@ class PrecisionPlexStateCoordinator:
         self._preferred_toggle_lock = asyncio.Lock()
         self.generator_command_lock = asyncio.Lock()
         self.lin_commands_expected = False
-        self.lin_command_path_down: bool | None = None
+        self.lin_command_problems: dict[str, tuple[str, ...] | None] = {
+            "bridge": None,
+            "generator": None,
+            "outputs": None,
+        }
+        self._lin_command_alert_unsubs: dict[str, Callable[[], None]] = {}
         self._lin_motion_lock = asyncio.Lock()
         self._active_command_streams = 0
         self._start_unsub: Callable[[], None] | None = None
@@ -190,6 +196,7 @@ class PrecisionPlexStateCoordinator:
             self._handle_lin_update,
             selected_bridge_id=entry.options.get(CONF_LIN_BRIDGE_ID) or None,
             allow_auto_binding=lambda: len(hass.config_entries.async_entries(DOMAIN)) == 1,
+            on_heartbeat=self._handle_lin_heartbeat,
         )
 
     async def async_start(self) -> None:
@@ -245,6 +252,9 @@ class PrecisionPlexStateCoordinator:
         """Stop coordinator, cancel the monitor task, and disconnect BLE cleanly."""
         self._stopped = True
         self.lin.stop()
+        for cancel in self._lin_command_alert_unsubs.values():
+            cancel()
+        self._lin_command_alert_unsubs.clear()
         self.clear_all_provisional_states(notify=False)
         self.clear_generator_command_pending(notify=False)
 
@@ -353,7 +363,13 @@ class PrecisionPlexStateCoordinator:
             if identity != self._last_lin_command_identity:
                 self._last_lin_command_identity = identity
                 self._apply_lin_command_intent(intent)
+        self._refresh_lin_command_health(notify=False)
         self._notify_listeners()
+
+    @callback
+    def _handle_lin_heartbeat(self) -> None:
+        """Check command availability even when telemetry values are unchanged."""
+        self._refresh_lin_command_health()
 
     @callback
     def _apply_lin_command_intent(self, intent: dict[str, object]) -> None:
@@ -898,27 +914,58 @@ class PrecisionPlexStateCoordinator:
         )
 
     @callback
-    def _refresh_lin_command_health(self) -> bool:
-        """Track command-path transitions and report whether LIN can own control."""
-        missing = self.lin.missing_command_paths
+    def _refresh_lin_command_health(
+        self, *, notify: bool = True, confirmed_path: str | None = None
+    ) -> bool:
+        """Return live command availability and publish independent diagnostics."""
+        if self._stopped:
+            return False
         if self.lin.full_command_support:
             self.lin_commands_expected = True
         if not self.lin_commands_expected:
             return False
 
-        down = bool(missing)
-        previous = self.lin_command_path_down
-        if previous != down:
-            self.lin_command_path_down = down
-            if down:
-                _LOGGER.warning(
-                    "Precision Plex LIN command path down; Bluetooth fallback required for %s",
-                    ", ".join(missing),
-                )
-            elif previous is True:
-                _LOGGER.warning("Precision Plex LIN command path recovered; releasing Bluetooth")
-            self._notify_listeners()
-        return not down
+        live_problems = self.lin.command_path_problems
+        previous_problems = self.lin_command_problems
+        reported_problems = previous_problems.copy()
+        for path, problems in live_problems.items():
+            previous = previous_problems[path]
+            if problems and not previous and path != confirmed_path:
+                # An established bridge already has heartbeat and bus timeouts.
+                # Allow startup one heartbeat window and filter short feedback gaps.
+                if path != "bridge":
+                    self._schedule_lin_command_alert(path, LIN_FEEDBACK_ALERT_DELAY_SECONDS)
+                    continue
+                if self.lin.bridge_id is None:
+                    self._schedule_lin_command_alert(path, SNAPSHOT_MAX_AGE_SECONDS)
+                    continue
+
+            if cancel := self._lin_command_alert_unsubs.pop(path, None):
+                cancel()
+            reported_problems[path] = problems
+            if problems and not previous:
+                _LOGGER.warning("Precision Plex LIN %s problem: %s", path, ", ".join(problems))
+            elif previous and problems == ():
+                _LOGGER.info("Precision Plex LIN %s recovered", path)
+
+        if reported_problems != previous_problems:
+            self.lin_command_problems = reported_problems
+            if notify:
+                self._notify_listeners()
+        return not any(live_problems.values())
+
+    @callback
+    def _schedule_lin_command_alert(self, path: str, delay: float) -> None:
+        """Start one confirmation timer for the affected path."""
+        if path in self._lin_command_alert_unsubs:
+            return
+
+        @callback
+        def confirm(_now: datetime) -> None:
+            self._lin_command_alert_unsubs.pop(path, None)
+            self._refresh_lin_command_health(confirmed_path=path)
+
+        self._lin_command_alert_unsubs[path] = async_call_later(self.hass, delay, confirm)
 
     async def _connection_loop(self) -> None:
         """Keep Bluetooth available only while the LIN command path needs fallback."""
