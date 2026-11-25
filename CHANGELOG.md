@@ -1,5 +1,10 @@
 # Changelog
 
+## v5.5.22 - Separate LIN Health Diagnostics
+
+- Separate bridge and bus problems from stale generator feedback and unavailable output or motion commands.
+- Report feedback and action problems after six continuous seconds and clear them on recovery, independently of Bluetooth reconnection.
+
 ## v5.5.21 - Signed Slide Encoder Position
 
 - Calibrates the bedroom, sofa, and wardrobe slide positions from both signed motor counts.

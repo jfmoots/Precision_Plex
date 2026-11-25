@@ -131,11 +131,13 @@ class PrecisionPlexLinTelemetry:
         *,
         selected_bridge_id: str | None = None,
         allow_auto_binding: Callable[[], bool] = lambda: True,
+        on_heartbeat: Callable[[], None] | None = None,
     ) -> None:
         self.hass = hass
         self._listener = listener
         self._selected_bridge_id = selected_bridge_id
         self._allow_auto_binding = allow_auto_binding
+        self._on_heartbeat = on_heartbeat
         self._multiple_bridges_seen = False
         self.entity_ids: dict[str, str] = {}
         self.command_entity_ids: dict[str, str] = {}
@@ -307,6 +309,8 @@ class PrecisionPlexLinTelemetry:
                     waiter.set_result(status)
         if meaningful_changed or bridge_changed or bridge_restarted or not was_fresh:
             self._listener()
+        elif self._on_heartbeat is not None:
+            self._on_heartbeat()
 
     def fresh_output_value(self, key: str) -> bool | None:
         """Read an output from a recent PID32 frame, excluding display grace."""
@@ -361,17 +365,43 @@ class PrecisionPlexLinTelemetry:
         )
 
     @property
-    def missing_command_paths(self) -> tuple[str, ...]:
-        """Return which command paths currently require Bluetooth."""
-        if not self.snapshot_fresh or self._snapshot.get("bus_active") is not True:
-            return ("LIN bridge or bus",)
-        missing = []
+    def bridge_problem(self) -> str | None:
+        """Identify a bridge or bus problem independently of decoded feedback."""
+        if self._selected_bridge_id is None and (
+            not self._allow_auto_binding() or self._multiple_bridges_seen
+        ):
+            return "LIN bridge selection"
+        if not self.snapshot_fresh:
+            return "LIN bridge heartbeat"
+        if self._snapshot.get("bus_active") is not True:
+            return "LIN bus traffic"
+        return None
+
+    @property
+    def command_path_problems(self) -> dict[str, tuple[str, ...] | None]:
+        """Report live command problems, with dependent paths unknown during a bridge loss."""
+        if bridge_problem := self.bridge_problem:
+            return {"bridge": (bridge_problem,), "generator": None, "outputs": None}
+
+        if self._snapshot.get("telemetry_active") is not True:
+            generator = ("PIDBA generator feedback stale",)
+        elif self.generator_action is None:
+            generator = ("generator action unavailable",)
+        else:
+            generator = ()
+
+        if self._snapshot.get("outputs_active") is not True:
+            return {
+                "bridge": (),
+                "generator": generator,
+                "outputs": ("PID32 output feedback stale",),
+            }
+
+        missing_outputs = []
         if not self.output_control_available:
-            missing.append("outputs")
-        if self.generator_action is None:
-            missing.append("generator")
-        missing.extend(key for key in LIN_MOTION_KEYS if self.motion_action(key) is None)
-        return tuple(missing)
+            missing_outputs.append("outputs")
+        missing_outputs.extend(key for key in LIN_MOTION_KEYS if self.motion_action(key) is None)
+        return {"bridge": (), "generator": generator, "outputs": tuple(missing_outputs)}
 
     async def async_generator_command(self, key: str) -> bool:
         """Confirm acceptance through PIDBA, with fallback only if nothing was sent."""

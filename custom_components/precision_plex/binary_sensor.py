@@ -29,7 +29,15 @@ async def async_setup_entry(
     ]
     entities.append(PrecisionPlexGeneratorRunningBinarySensor(coordinator, entry))
     entities.append(PrecisionPlexBleConnectedBinarySensor(coordinator, entry))
-    entities.append(PrecisionPlexLinCommandProblem(coordinator))
+    entities.extend(
+        PrecisionPlexLinCommandProblem(coordinator, path, name, unique_id_suffix)
+        for path, name, unique_id_suffix in (
+            # Keep the existing entity and its dashboard and automation references.
+            ("bridge", "LIN Command Path Problem", "lin_command_path_problem"),
+            ("generator", "LIN Generator Command Problem", "lin_generator_command_problem"),
+            ("outputs", "LIN Output and Motion Command Problem", "lin_output_motion_command_problem"),
+        )
+    )
     entities.extend(
         PrecisionPlexLinOnlyBinarySensor(coordinator, entry, key, name, device_class)
         for key, name, device_class in (
@@ -52,16 +60,20 @@ async def async_setup_entry(
 
 
 class PrecisionPlexLinCommandProblem(BinarySensorEntity, RestoreEntity):
-    """A dashboard-ready problem sensor for the LIN command path."""
+    """A dashboard-ready problem sensor for one LIN command path."""
 
     _attr_has_entity_name = True
-    _attr_name = "LIN Command Path Problem"
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, coordinator: PrecisionPlexStateCoordinator) -> None:
+    def __init__(
+        self, coordinator: PrecisionPlexStateCoordinator, path: str,
+        name: str, unique_id_suffix: str,
+    ) -> None:
         self.coordinator = coordinator
-        self._attr_unique_id = f"{coordinator.address}_lin_command_path_problem"
+        self._path = path
+        self._attr_name = name
+        self._attr_unique_id = f"{coordinator.address}_{unique_id_suffix}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.address)},
             "connections": {(CONNECTION_BLUETOOTH, coordinator.address)},
@@ -71,22 +83,24 @@ class PrecisionPlexLinCommandProblem(BinarySensorEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        previous = await self.async_get_last_state()
-        if previous is not None and previous.state in ("on", "off"):
-            self.coordinator.lin_commands_expected = True
+        if self._path == "bridge":
+            previous = await self.async_get_last_state()
+            if previous is not None and previous.state in ("on", "off"):
+                self.coordinator.lin_commands_expected = True
         self.async_on_remove(self.coordinator.async_add_listener(self.async_write_ha_state))
 
     @property
     def available(self) -> bool:
-        return self.coordinator.lin_command_path_down is not None
+        return self.coordinator.lin_command_problems[self._path] is not None
 
     @property
     def is_on(self) -> bool | None:
-        return self.coordinator.lin_command_path_down
+        problems = self.coordinator.lin_command_problems[self._path]
+        return bool(problems) if problems is not None else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"missing_command_paths": list(self.coordinator.lin.missing_command_paths)}
+        return {"missing_command_paths": list(self.coordinator.lin_command_problems[self._path] or ())}
 
 
 class PrecisionPlexLinOnlyBinarySensor(BinarySensorEntity):
