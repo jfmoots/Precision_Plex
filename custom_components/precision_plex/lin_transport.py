@@ -350,21 +350,20 @@ class PrecisionPlexLinTelemetry:
             f"LIN command for {key} reported {status}. Check the reported output state."
         )
 
-    @property
-    def awning_motion_action(self) -> str | None:
-        """Find the native LIN awning action on the active bridge."""
+    def motion_action(self, key: str) -> str | None:
+        """Find the native leased motion action on the active bridge."""
         if (
             not self.snapshot_fresh
-            or self._snapshot.get("awning_motion_capable") is not True
+            or self._snapshot.get(f"{key}_motion_capable") is not True
             or self._snapshot.get("outputs_active") is not True
             or self.bridge_id in (None, "unknown")
         ):
             return None
-        service = f"{slugify(self.bridge_id)}_precision_plex_awning_motion"
+        service = f"{slugify(self.bridge_id)}_precision_plex_{key}_motion"
         return service if self.hass.services.has_service("esphome", service) else None
 
-    async def async_awning_hold(
-        self, service: str, extend: bool, stop_event: asyncio.Event, duration: float
+    async def async_motion_hold(
+        self, key: str, service: str, extend: bool, stop_event: asyncio.Event, duration: float
     ) -> bool:
         """Return False only when the bridge confirms no motion command was sent."""
         request_id = uuid4().hex
@@ -374,9 +373,9 @@ class PrecisionPlexLinTelemetry:
         def status() -> str | None:
             if self.bridge_id != bridge_id or not self.snapshot_fresh:
                 return None
-            if self._snapshot.get("awning_motion_request") != request_id:
+            if self._snapshot.get(f"{key}_motion_request") != request_id:
                 return None
-            return self._snapshot.get("awning_motion_status")
+            return self._snapshot.get(f"{key}_motion_status")
 
         async def send(operation: str) -> None:
             await asyncio.wait_for(
@@ -409,14 +408,14 @@ class PrecisionPlexLinTelemetry:
                     return False
                 if current in terminal:
                     if current == "motion_ended" and not stop_event.is_set():
-                        raise HomeAssistantError("Awning motion ended before the requested stop")
+                        raise HomeAssistantError(f"LIN {key} motion ended before the requested stop")
                     return True
                 if current not in running:
-                    raise HomeAssistantError(f"LIN awning reported {current}")
+                    raise HomeAssistantError(f"LIN {key} reported {current}")
                 if stop_event.is_set():
                     break
                 if loop.time() - started > 1.2 and current is None:
-                    raise HomeAssistantError("LIN awning did not acknowledge the motion request")
+                    raise HomeAssistantError(f"LIN {key} did not acknowledge the motion request")
                 # The bridge lease starts when it receives start. Its status
                 # event can take longer to arrive, so renew the same request
                 # while waiting for acknowledgement as well. The bridge only
@@ -431,7 +430,7 @@ class PrecisionPlexLinTelemetry:
                 try:
                     await send("stop")
                 except (HomeAssistantError, asyncio.TimeoutError):
-                    _LOGGER.warning("LIN awning stop dispatch failed; bridge lease will expire")
+                    _LOGGER.warning("LIN %s stop dispatch failed; bridge lease will expire", key)
 
         confirm_by = loop.time() + 1.0
         while loop.time() < confirm_by:
@@ -443,7 +442,7 @@ class PrecisionPlexLinTelemetry:
             if current not in running:
                 break
             await asyncio.sleep(0.05)
-        raise HomeAssistantError("PID32 did not confirm the LIN awning stopped")
+        raise HomeAssistantError(f"PID32 did not confirm that LIN {key} stopped")
 
     @staticmethod
     def _meaningful_snapshot(payload: dict[str, Any]) -> dict[str, Any]:

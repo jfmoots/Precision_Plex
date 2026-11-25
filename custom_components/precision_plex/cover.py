@@ -735,11 +735,11 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             # Send both releases for safety. These are best-effort so a stale
             # BlueZ/Bleak connection cannot make the entity unavailable from
             # an exception in the websocket service call.
-            # The active awning stream releases through its own transport.
+            # The active LIN-capable stream releases through its own transport.
             release_payloads = (
                 self._plex_description.out_release_payload,
                 self._plex_description.in_release_payload,
-            ) if not self._is_awning() or no_ha_stream else ()
+            ) if self._lin_motion_key() is None or no_ha_stream else ()
             for payload in release_payloads:
                 try:
                     await self.coordinator.async_write_command(payload)
@@ -818,7 +818,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     stop_event=extend_stop_event,
                     interval_seconds=HOLD_INTERVAL_SECONDS,
                     max_duration_seconds=max_duration,
-                    lin_awning_direction="out",
+                    lin_direction="out",
                 )
             )
 
@@ -889,7 +889,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     stop_event=stop_event,
                     interval_seconds=HOLD_INTERVAL_SECONDS,
                     max_duration_seconds=flip_seconds,
-                    lin_awning_direction="in",
+                    lin_direction="in",
                 )
                 _LOGGER.info("Precision Plex smart awning Carefree flip complete; current=%.2fA", self._read_awning_current() or 0.0)
 
@@ -948,7 +948,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     stop_event=stop_event,
                     interval_seconds=HOLD_INTERVAL_SECONDS,
                     max_duration_seconds=max_duration,
-                    lin_awning_direction="in",
+                    lin_direction="in",
                 )
             )
 
@@ -1185,13 +1185,15 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 )
             )
 
+            lin_motion_key = self._lin_motion_key()
             await self.coordinator.async_write_hold_stream(
                 release_payload=release_payload,
                 hold_payload=hold_payload,
                 stop_event=stop_event,
                 interval_seconds=HOLD_INTERVAL_SECONDS,
                 max_duration_seconds=max_duration_seconds,
-                lin_awning_direction=direction if self._is_awning() else None,
+                lin_direction=direction if lin_motion_key else None,
+                lin_motion_key=lin_motion_key or "awning",
             )
             completed_by_timeout = not stop_event.is_set()
         except Exception as err:
@@ -1539,6 +1541,15 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         self._position_source = "quadrature"
         return True
 
+
+    def _lin_motion_key(self) -> str | None:
+        """Return the bridge motion key for a LIN-capable cover."""
+        return {
+            "awning": "awning",
+            "bed_slide": "bedroom_slide",
+            "sofa_slide": "sofa_slide",
+            "wardrobe_slide": "wardrobe_slide",
+        }.get(self._plex_description.key)
 
     def _is_awning(self) -> bool:
         """Return whether this cover is the patio awning."""
