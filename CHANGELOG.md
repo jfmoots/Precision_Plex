@@ -1,5 +1,11 @@
 # Changelog
 
+## v5.5.19 - LIN Generator Control and Bluetooth Failover
+
+- Prefers LIN for generator Start, Stop, AutoStart, and AutoStop with bridge firmware v0.6.8.
+- Releases Bluetooth when the complete LIN command path is healthy and reconnects on LIN loss.
+- Adds a LIN Command Path Problem diagnostic and logs outage and recovery transitions.
+
 ## v5.5.18 - LIN Slide Control
 
 - Prefers LIN for bedroom, sofa, and wardrobe slide movement when the matching bridge actions are available.

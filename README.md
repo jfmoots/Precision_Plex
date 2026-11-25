@@ -93,7 +93,19 @@ nothing. An ambiguous result or safety refusal ends the request.
 Bridge firmware v0.6.7 adds the bedroom, sofa, and wardrobe slide actions. The
 same LIN preference and Bluetooth fallback apply when those actions are
 configured. Slide position continues to use quadrature where available and
-timed estimates otherwise. Generator controls use Bluetooth.
+timed estimates otherwise.
+
+With bridge firmware v0.6.8 and its native generator action configured, manual
+Start and Stop and the managed AutoStart and AutoStop actions also prefer LIN.
+The bridge acknowledges the command through PIDBA. AutoStart and AutoStop
+can continue after that acknowledgement.
+
+The integration releases its idle Bluetooth connection when the complete
+LIN command set is available. If the bridge or an action becomes unavailable,
+the integration reconnects to Bluetooth and logs the outage. It logs recovery
+and releases Bluetooth after any active Bluetooth command finishes. The
+`LIN Command Path Problem` diagnostic binary sensor can drive a dashboard
+alert without a notification automation.
 
 Rotating PIDBA, PID32, PIDEC, and PID37 broadcasts retain their last valid state
 for 30 seconds while the bridge heartbeat remains healthy. If the event
