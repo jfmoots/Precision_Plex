@@ -21,6 +21,8 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_LIN_BRIDGE_ID,
+    DOMAIN,
     PAIRING_CHARACTERISTIC_UUID,
     PAIRING_INIT_PAYLOAD,
     STATE_CHARACTERISTIC_UUID,
@@ -31,6 +33,7 @@ from .const import (
     get_profile,
 )
 from .lin_transport import LIN_CONTROL_KEYS, PrecisionPlexLinTelemetry
+from .motion import MotionEnd, MotionResult
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -182,7 +185,12 @@ class PrecisionPlexStateCoordinator:
         self._last_lin_command_identity: tuple[str | None, int] | None = None
         self._last_lin_uptime_ms: int | None = None
         self._last_command_transport: dict[str, str] = {}
-        self.lin = PrecisionPlexLinTelemetry(hass, self._handle_lin_update)
+        self.lin = PrecisionPlexLinTelemetry(
+            hass,
+            self._handle_lin_update,
+            selected_bridge_id=entry.options.get(CONF_LIN_BRIDGE_ID) or None,
+            allow_auto_binding=lambda: len(hass.config_entries.async_entries(DOMAIN)) == 1,
+        )
 
     async def async_start(self) -> None:
         """Start the BLE connection task.
@@ -1108,31 +1116,31 @@ class PrecisionPlexStateCoordinator:
         *,
         lin_direction: str | None = None,
         lin_motion_key: str = "awning",
-    ) -> str:
-        """Send release once, then repeat hold until stopped or max duration expires."""
+    ) -> MotionResult:
+        """Select a transport and report how the hold ended."""
         if self._stopped:
             raise BleakError("Precision Plex coordinator is stopped")
 
         if lin_direction is not None:
             async with self._lin_motion_lock:
                 if stop_event.is_set():
-                    return "stopped"
+                    return MotionResult(MotionEnd.CANCELED)
                 service = self.lin.motion_action(lin_motion_key)
                 if service is not None:
-                    used_lin = await self.lin.async_motion_hold(
+                    end = await self.lin.async_motion_hold(
                         lin_motion_key, service, lin_direction == "out", stop_event, max_duration_seconds
                     )
-                    if used_lin:
-                        return "lin"
+                    if end is not MotionEnd.NOT_SENT:
+                        return MotionResult(end, "lin")
                 if stop_event.is_set():
-                    return "stopped"
+                    return MotionResult(MotionEnd.CANCELED)
                 return await self.async_write_hold_stream(
                     release_payload, hold_payload, stop_event, interval_seconds, max_duration_seconds
                 )
 
         self._begin_command_stream("hold_stream")
         try:
-            await self._async_write_hold_stream_locked(
+            return await self._async_write_hold_stream_locked(
                 release_payload=release_payload,
                 hold_payload=hold_payload,
                 stop_event=stop_event,
@@ -1141,7 +1149,6 @@ class PrecisionPlexStateCoordinator:
             )
         finally:
             self._end_command_stream("hold_stream")
-        return "bluetooth"
 
     async def _async_write_hold_stream_locked(
         self,
@@ -1150,9 +1157,11 @@ class PrecisionPlexStateCoordinator:
         stop_event: asyncio.Event,
         interval_seconds: float = 0.30,
         max_duration_seconds: float = 30.0,
-    ) -> None:
+    ) -> MotionResult:
         """Send a hold stream while BLE ownership has already been marked."""
         async with self._write_lock:
+            if stop_event.is_set():
+                return MotionResult(MotionEnd.CANCELED)
             client = self._client
             control_char = None
 
@@ -1208,15 +1217,17 @@ class PrecisionPlexStateCoordinator:
                 if last_error is not None:
                     raise last_error
 
-            async def _best_effort_release() -> None:
+            async def _best_effort_release() -> bool:
                 try:
                     if not self._stopped:
                         await _write(release_payload)
-                except BLE_EXCEPTIONS as err:
-                    _LOGGER.warning("Precision Plex hold stream release write failed safely: %r", err)
+                        return True
                 except Exception as err:
-                    _LOGGER.warning("Precision Plex hold stream release unexpected failure: %r", err)
+                    self.last_hold_stream_error = repr(err)
+                    _LOGGER.warning("Precision Plex hold stream release failed: %r", err)
+                return False
 
+            hold_sent = False
             try:
                 await _write(release_payload)
 
@@ -1224,22 +1235,27 @@ class PrecisionPlexStateCoordinator:
 
                 while not stop_event.is_set() and asyncio.get_running_loop().time() < end_time:
                     await _write(hold_payload)
+                    hold_sent = True
 
                     try:
                         await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
                     except asyncio.TimeoutError:
                         pass
 
-            except BLE_EXCEPTIONS as err:
-                self.hold_stream_interruption_count += 1
-                self.last_hold_stream_error = repr(err)
-                _LOGGER.warning("Precision Plex hold stream stopped after BLE error: %r", err)
             except Exception as err:
                 self.hold_stream_interruption_count += 1
                 self.last_hold_stream_error = repr(err)
-                _LOGGER.warning("Precision Plex hold stream stopped after unexpected error: %r", err)
+                raise HomeAssistantError("Precision Plex Bluetooth hold stream failed") from err
             finally:
-                await _best_effort_release()
+                released = await _best_effort_release()
+
+            if not released:
+                self.hold_stream_interruption_count += 1
+                raise HomeAssistantError("Precision Plex Bluetooth release write failed")
+            if not hold_sent:
+                return MotionResult(MotionEnd.CANCELED, "bluetooth")
+            end = MotionEnd.STOPPED if stop_event.is_set() else MotionEnd.DURATION_COMPLETE
+            return MotionResult(end, "bluetooth")
 
     async def _async_get_control_char(self):
         """Return connected client and control characteristic."""

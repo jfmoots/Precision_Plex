@@ -17,6 +17,8 @@ from homeassistant.util import slugify
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 
+from .motion import MotionEnd
+
 _LOGGER = logging.getLogger(__name__)
 
 LIN_SNAPSHOT_EVENT = "esphome.precision_plex_lin_snapshot"
@@ -122,9 +124,19 @@ _HVAC_ZONE_2_KEYS = {key for key in LIN_ENTITY_NAMES if key.startswith("hvac_zon
 class PrecisionPlexLinTelemetry:
     """Track a co-located ESPHome LIN bridge without fixed entity IDs."""
 
-    def __init__(self, hass: HomeAssistant, listener: Callable[[], None]) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        listener: Callable[[], None],
+        *,
+        selected_bridge_id: str | None = None,
+        allow_auto_binding: Callable[[], bool] = lambda: True,
+    ) -> None:
         self.hass = hass
         self._listener = listener
+        self._selected_bridge_id = selected_bridge_id
+        self._allow_auto_binding = allow_auto_binding
+        self._multiple_bridges_seen = False
         self.entity_ids: dict[str, str] = {}
         self.command_entity_ids: dict[str, str] = {}
         self.device_id: str | None = None
@@ -183,6 +195,7 @@ class PrecisionPlexLinTelemetry:
             source: None for source in _SNAPSHOT_SOURCE_KEYS
         }
         self.bridge_id = None
+        self._multiple_bridges_seen = False
         self._legacy_initial_command_identity = None
         self._last_uptime_ms = None
 
@@ -203,7 +216,22 @@ class PrecisionPlexLinTelemetry:
         # does not receive the complete telemetry snapshot every two seconds.
         # Merge those liveness fields into the last change snapshot while
         # retaining compatibility with older firmware's full heartbeats.
-        bridge_id = str(event.data.get("bridge_id") or "unknown")
+        raw_bridge_id = event.data.get("bridge_id")
+        bridge_id = (
+            raw_bridge_id if isinstance(raw_bridge_id, str) and raw_bridge_id else "unknown"
+        )
+        if self._selected_bridge_id is not None:
+            if bridge_id != self._selected_bridge_id:
+                return
+        elif not self._allow_auto_binding() or self._multiple_bridges_seen:
+            return
+        elif self.bridge_id is not None and bridge_id != self.bridge_id:
+            self._multiple_bridges_seen = True
+            _LOGGER.warning("Multiple Precision Plex LIN bridges detected; configure a bridge ID")
+            self._listener()
+            return
+
+        was_fresh = self.snapshot_fresh
         if (
             payload.get("snapshot_reason") == "heartbeat"
             and self._snapshot
@@ -277,7 +305,7 @@ class PrecisionPlexLinTelemetry:
                 waiter = self._command_waiters.get((bridge_id, request_id))
                 if waiter is not None and not waiter.done():
                     waiter.set_result(status)
-        if meaningful_changed or bridge_changed:
+        if meaningful_changed or bridge_changed or bridge_restarted or not was_fresh:
             self._listener()
 
     def fresh_output_value(self, key: str) -> bool | None:
@@ -303,15 +331,7 @@ class PrecisionPlexLinTelemetry:
 
     @property
     def _output_action(self) -> str | None:
-        if (
-            not self.snapshot_fresh
-            or not self.output_control_capable
-            or self._snapshot.get("outputs_active") is not True
-            or self.bridge_id in (None, "unknown")
-        ):
-            return None
-        service = f"{slugify(self.bridge_id)}_precision_plex_set_output"
-        return service if self.hass.services.has_service("esphome", service) else None
+        return self._command_action("set_output", "output_control_capable", "outputs_active")
 
     async def async_set_output(self, key: str, desired: bool) -> bool:
         """Return false only when LIN is unavailable or the bridge sent nothing."""
@@ -327,15 +347,9 @@ class PrecisionPlexLinTelemetry:
     @property
     def generator_action(self) -> str | None:
         """Find the generator action on a live, capable LIN bridge."""
-        if (
-            not self.snapshot_fresh
-            or self._snapshot.get("generator_command_capable") is not True
-            or self._snapshot.get("telemetry_active") is not True
-            or self.bridge_id in (None, "unknown")
-        ):
-            return None
-        service = f"{slugify(self.bridge_id)}_precision_plex_generator_command"
-        return service if self.hass.services.has_service("esphome", service) else None
+        return self._command_action(
+            "generator_command", "generator_command_capable", "telemetry_active"
+        )
 
     @property
     def full_command_support(self) -> bool:
@@ -403,20 +417,29 @@ class PrecisionPlexLinTelemetry:
 
     def motion_action(self, key: str) -> str | None:
         """Find the native leased motion action on the active bridge."""
+        return self._command_action(
+            f"{key}_motion", f"{key}_motion_capable", "outputs_active"
+        )
+
+    def _command_action(self, action: str, capability: str, source: str) -> str | None:
+        """Resolve an advertised action on the same bridge as the live telemetry."""
+        bridge_id = self.bridge_id
         if (
             not self.snapshot_fresh
-            or self._snapshot.get(f"{key}_motion_capable") is not True
-            or self._snapshot.get("outputs_active") is not True
-            or self.bridge_id in (None, "unknown")
+            or self._snapshot.get("bus_active") is not True
+            or self._snapshot.get(capability) is not True
+            or self._snapshot.get(source) is not True
+            or bridge_id is None
+            or bridge_id == "unknown"
         ):
             return None
-        service = f"{slugify(self.bridge_id)}_precision_plex_{key}_motion"
+        service = f"{slugify(bridge_id)}_precision_plex_{action}"
         return service if self.hass.services.has_service("esphome", service) else None
 
     async def async_motion_hold(
         self, key: str, service: str, extend: bool, stop_event: asyncio.Event, duration: float
-    ) -> bool:
-        """Return False only when the bridge confirms no motion command was sent."""
+    ) -> MotionEnd:
+        """Return the bridge-confirmed completion, or raise on uncertain results."""
         request_id = uuid4().hex
         bridge_id = self.bridge_id
         max_ms = max(1, min(90000, round(duration * 1000)))
@@ -445,22 +468,20 @@ class PrecisionPlexLinTelemetry:
             )
 
         if stop_event.is_set():
-            return True
+            return MotionEnd.CANCELED
         loop = asyncio.get_running_loop()
         started = loop.time()
         finish_by = started + max_ms / 1000 + 1.5
-        terminal = {"stopped", "duration_complete", "motion_ended", "canceled"}
+        terminal = set(MotionEnd)
         running = {None, "armed", "moving"}
         try:
             await send("start")
             while loop.time() < finish_by:
                 current = status()
-                if current == "not_sent":
-                    return False
                 if current in terminal:
                     if current == "motion_ended" and not stop_event.is_set():
                         raise HomeAssistantError(f"LIN {key} motion ended before the requested stop")
-                    return True
+                    return MotionEnd(current)
                 if current not in running:
                     raise HomeAssistantError(f"LIN {key} reported {current}")
                 if stop_event.is_set():
@@ -486,10 +507,8 @@ class PrecisionPlexLinTelemetry:
         confirm_by = loop.time() + 1.0
         while loop.time() < confirm_by:
             current = status()
-            if current == "not_sent":
-                return False
             if current in terminal:
-                return True
+                return MotionEnd(current)
             if current not in running:
                 break
             await asyncio.sleep(0.05)
@@ -634,6 +653,12 @@ class PrecisionPlexLinTelemetry:
 
     def state(self, key: str) -> State | None:
         """Return a usable LIN entity state."""
+        if (
+            self._selected_bridge_id is not None
+            or self.bridge_id is not None
+            or not self._allow_auto_binding()
+        ):
+            return None
         entity_id = self.entity_ids.get(key)
         if entity_id is None:
             return None
@@ -687,7 +712,11 @@ class PrecisionPlexLinTelemetry:
     def snapshot_fresh(self) -> bool:
         """Return whether the event heartbeat is still current."""
         return (
-            self._snapshot_received is not None
+            (
+                self._selected_bridge_id is not None
+                or (self._allow_auto_binding() and not self._multiple_bridges_seen)
+            )
+            and self._snapshot_received is not None
             and time.monotonic() - self._snapshot_received <= SNAPSHOT_MAX_AGE_SECONDS
         )
 
