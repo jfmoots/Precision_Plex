@@ -166,7 +166,7 @@ class PrecisionPlexStateCoordinator:
         self._stopped = False
         self._write_lock = asyncio.Lock()
         self._preferred_toggle_lock = asyncio.Lock()
-        self._awning_motion_lock = asyncio.Lock()
+        self._lin_motion_lock = asyncio.Lock()
         self._active_command_streams = 0
         self._start_unsub: Callable[[], None] | None = None
         self._provisional_states: dict[str, bool] = {}
@@ -1086,20 +1086,21 @@ class PrecisionPlexStateCoordinator:
         interval_seconds: float = 0.30,
         max_duration_seconds: float = 30.0,
         *,
-        lin_awning_direction: str | None = None,
+        lin_direction: str | None = None,
+        lin_motion_key: str = "awning",
     ) -> str:
         """Send release once, then repeat hold until stopped or max duration expires."""
         if self._stopped:
             raise BleakError("Precision Plex coordinator is stopped")
 
-        if lin_awning_direction is not None:
-            async with self._awning_motion_lock:
+        if lin_direction is not None:
+            async with self._lin_motion_lock:
                 if stop_event.is_set():
                     return "stopped"
-                service = self.lin.awning_motion_action
+                service = self.lin.motion_action(lin_motion_key)
                 if service is not None:
-                    used_lin = await self.lin.async_awning_hold(
-                        service, lin_awning_direction == "out", stop_event, max_duration_seconds
+                    used_lin = await self.lin.async_motion_hold(
+                        lin_motion_key, service, lin_direction == "out", stop_event, max_duration_seconds
                     )
                     if used_lin:
                         return "lin"

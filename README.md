@@ -88,8 +88,12 @@ With bridge firmware v0.6.6 and its native ESPHome actions configured, the patio
 awning, awning light, water heater, and water pump prefer LIN. The smart awning
 uses its motor-current sensor for the Carefree flip. Bluetooth handles a
 command if LIN is unavailable before sending or confirms that it sent
-nothing. An ambiguous result or safety refusal ends the request. Slides and
-generator controls use Bluetooth.
+nothing. An ambiguous result or safety refusal ends the request.
+
+Bridge firmware v0.6.7 adds the bedroom, sofa, and wardrobe slide actions. The
+same LIN preference and Bluetooth fallback apply when those actions are
+configured. Slide position continues to use quadrature where available and
+timed estimates otherwise. Generator controls use Bluetooth.
 
 Rotating PIDBA, PID32, PIDEC, and PID37 broadcasts retain their last valid state
 for 30 seconds while the bridge heartbeat remains healthy. If the event
