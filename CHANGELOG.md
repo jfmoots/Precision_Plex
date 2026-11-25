@@ -1,5 +1,11 @@
 # Changelog
 
+## v5.5.18 - LIN Slide Control
+
+- Prefers LIN for bedroom, sofa, and wardrobe slide movement when the matching bridge actions are available.
+- Uses Bluetooth when LIN is unavailable before sending or the bridge confirms that it sent no command.
+- Preserves existing position tracking and endpoint calibration for all three slides.
+
 ## v5.5.17 - LIN Patio Awning Control
 
 - Prefers a compatible ESPHome bridge for patio-awning movement, including the Carefree flip.
