@@ -36,6 +36,7 @@ from .const import (
     STATE_BITS,
 )
 from .coordinator import PrecisionPlexStateCoordinator
+from .motion import MotionEnd
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -869,14 +870,15 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
             extend_stop_event.set()
 
-            if stream_task is not None:
-                transport = await stream_task
-                _LOGGER.info("Precision Plex smart awning extend stream stopped; detected_arm_lock=%s current=%.2fA", detected_arm_lock, self._read_awning_current() or 0.0)
+            result = await stream_task
+            if result.end is MotionEnd.CANCELED:
+                return
+            _LOGGER.info("Precision Plex smart awning extend stream stopped; detected_arm_lock=%s current=%.2fA", detected_arm_lock, self._read_awning_current() or 0.0)
 
             # Send one explicit extend release after the hold stream exits. This
             # mirrors the manual Stop behavior and makes sure the Precision Plex
             # controller is not left latched before the fabric-tighten retract.
-            if transport == "bluetooth":
+            if result.transport == "bluetooth":
                 try:
                     await self.coordinator.async_write_command(self._plex_description.out_release_payload)
                 except Exception as err:
@@ -887,7 +889,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 self._active_direction = "in"
                 self._start_tracking_motion("in")
                 self._set_provisional_motion("in")
-                await self.coordinator.async_write_hold_stream(
+                flip = await self.coordinator.async_write_hold_stream(
                     release_payload=self._plex_description.in_release_payload,
                     hold_payload=self._plex_description.in_hold_payload,
                     stop_event=stop_event,
@@ -895,6 +897,8 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                     max_duration_seconds=flip_seconds,
                     lin_direction="in",
                 )
+                if flip.end is not MotionEnd.DURATION_COMPLETE:
+                    return
                 _LOGGER.info("Precision Plex smart awning Carefree flip complete; current=%.2fA", self._read_awning_current() or 0.0)
 
             if detected_arm_lock and not stop_event.is_set():
@@ -1005,14 +1009,15 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
 
             stop_event.set()
 
-            if stream_task is not None:
-                transport = await stream_task
+            result = await stream_task
+            if result.end is MotionEnd.CANCELED:
+                return
 
             # Always send one additional release after the stream exits.  This is
             # intentionally redundant and mirrors the manual Stop action that
             # clears the Precision Plex active/moving bit if the stream exit
             # release was missed or the controller stayed latched.
-            if transport == "bluetooth":
+            if result.transport == "bluetooth":
                 try:
                     await self.coordinator.async_write_command(self._plex_description.in_release_payload)
                 except Exception as err:
@@ -1179,9 +1184,12 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
         target_endpoint: float | None,
     ) -> None:
         """Run hold stream and clean up when complete."""
-        completed_by_timeout = False
+        completed = False
         verification_task: asyncio.Task | None = None
+        start_total = None
         try:
+            if target_endpoint is not None:
+                start_total = self._read_quadrature_travel_total()
             verification_task = asyncio.create_task(
                 self._async_verify_quadrature_motion(
                     stop_event=stop_event,
@@ -1190,7 +1198,7 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             )
 
             lin_motion_key = self._lin_motion_key()
-            await self.coordinator.async_write_hold_stream(
+            result = await self.coordinator.async_write_hold_stream(
                 release_payload=release_payload,
                 hold_payload=hold_payload,
                 stop_event=stop_event,
@@ -1199,12 +1207,11 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
                 lin_direction=direction if lin_motion_key else None,
                 lin_motion_key=lin_motion_key or "awning",
             )
-            completed_by_timeout = not stop_event.is_set()
+            completed = result.end is MotionEnd.DURATION_COMPLETE and not stop_event.is_set()
         except Exception as err:
-            # The coordinator should already suppress BLE failures, but keep this
-            # guard so a background task never leaks an exception to HA.
+            # Keep transport failures from leaking out of the background task.
             _LOGGER.warning(
-                "Precision Plex %s hold task ended safely after error: %r",
+                "Precision Plex %s hold task failed: %r",
                 self._plex_description.key,
                 err,
             )
@@ -1228,18 +1235,20 @@ class PrecisionPlexTimedCover(CoverEntity, RestoreEntity):
             # Learn the live quadrature endpoint before snapping so the next
             # telemetry refresh cannot overwrite 100%/0% with the old count.
             # Jog and intermediate-position commands do not pass an endpoint.
-            if completed_by_timeout and target_endpoint is not None:
+            if completed and target_endpoint is not None:
                 current_total = self._read_quadrature_travel_total()
-                if (
-                    current_total is not None
-                    and self._calibrate_quadrature_endpoint(
-                        target_endpoint, current_total
-                    )
+                if start_total is None and current_total is None:
+                    self._estimated_position = target_endpoint
+                elif (
+                    start_total is not None
+                    and current_total is not None
+                    and abs(current_total - start_total) >= MOTION_VERIFICATION_MIN_DELTA_COUNTS
                 ):
-                    self._last_quadrature_total = current_total
-                    self._last_quadrature_delta = None
-                    self._position_source = "quadrature_calibrated"
-                self._estimated_position = target_endpoint
+                    if self._calibrate_quadrature_endpoint(target_endpoint, current_total):
+                        self._last_quadrature_total = current_total
+                        self._last_quadrature_delta = None
+                        self._position_source = "quadrature_calibrated"
+                    self._estimated_position = target_endpoint
 
             self._motion_direction = None
             self._set_provisional_motion(None)

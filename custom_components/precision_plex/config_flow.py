@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 import voluptuous as vol
 
@@ -28,6 +29,7 @@ from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
 
 from .const import (
+    CONF_LIN_BRIDGE_ID,
     DOMAIN,
     PAIRING_CHARACTERISTIC_UUID,
     PAIRING_INIT_PAYLOAD,
@@ -57,7 +59,7 @@ class PrecisionPlexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Create the options flow for an existing Precision Plex entry."""
-        return PrecisionPlexOptionsFlow(config_entry)
+        return PrecisionPlexOptionsFlow()
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
@@ -360,28 +362,46 @@ class PrecisionPlexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await agent.async_unregister()
 
 
-class PrecisionPlexOptionsFlow(config_entries.OptionsFlow):
+class PrecisionPlexOptionsFlow(config_entries.OptionsFlowWithReload):
     """Options flow for an existing Precision Plex config entry."""
 
-    def __init__(self, config_entry):
-        """Initialize the options flow."""
-        self._config_entry = config_entry
-        self._address = config_entry.data.get(CONF_ADDRESS)
-        self._unloaded_for_repair = False
+    @property
+    def _address(self):
+        return self.config_entry.data.get(CONF_ADDRESS)
 
     async def async_step_init(self, user_input=None):
         """Offer maintenance actions for an existing Precision Plex entry."""
         errors = {}
 
+        bridge_id = self.config_entry.options.get(CONF_LIN_BRIDGE_ID, "")
         if user_input is not None:
             if user_input.get(CONF_REPAIR_START):
                 return await self.async_step_repair_pair()
-            return self.async_create_entry(title="", data={})
+
+            bridge_id = user_input.get(CONF_LIN_BRIDGE_ID, "").strip()
+            if bridge_id and (
+                bridge_id == "unknown" or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", bridge_id)
+            ):
+                errors[CONF_LIN_BRIDGE_ID] = "invalid_bridge_id"
+            elif bridge_id and any(
+                entry.entry_id != self.config_entry.entry_id
+                and entry.options.get(CONF_LIN_BRIDGE_ID) == bridge_id
+                for entry in self.hass.config_entries.async_entries(DOMAIN)
+            ):
+                errors[CONF_LIN_BRIDGE_ID] = "bridge_already_configured"
+            else:
+                options = dict(self.config_entry.options)
+                if bridge_id:
+                    options[CONF_LIN_BRIDGE_ID] = bridge_id
+                else:
+                    options.pop(CONF_LIN_BRIDGE_ID, None)
+                return self.async_create_entry(title="", data=options)
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Optional(CONF_LIN_BRIDGE_ID, default=bridge_id): str,
                     vol.Required(CONF_REPAIR_START, default=False): bool,
                 }
             ),
@@ -413,7 +433,7 @@ class PrecisionPlexOptionsFlow(config_entries.OptionsFlow):
                     )
                     errors["base"] = "pairing_failed"
                 else:
-                    return self.async_create_entry(title="", data={})
+                    return self.async_create_entry(title="", data=dict(self.config_entry.options))
 
         return self.async_show_form(
             step_id="repair_pair",
@@ -436,14 +456,14 @@ class PrecisionPlexOptionsFlow(config_entries.OptionsFlow):
         unloaded = False
         try:
             unloaded = await self.hass.config_entries.async_unload(
-                self._config_entry.entry_id
+                self.config_entry.entry_id
             )
             await flow._async_pair_and_prime(address)  # pylint: disable=protected-access
         finally:
             # Reload the entry even when pairing fails, so an already-working
             # install is not left unloaded from an unsuccessful maintenance try.
             if unloaded:
-                await self.hass.config_entries.async_reload(self._config_entry.entry_id)
+                await self.hass.config_entries.async_reload(self.config_entry.entry_id)
 
 
 class BlueZPairingAgent:

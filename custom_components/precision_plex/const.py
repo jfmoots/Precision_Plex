@@ -3,6 +3,7 @@
 from homeassistant.const import CONF_ADDRESS
 
 DOMAIN = "precision_plex"
+CONF_LIN_BRIDGE_ID = "lin_bridge_id"
 PLATFORMS = ["binary_sensor", "cover", "button", "light", "switch", "number", "sensor"]
 
 DEFAULT_TARGET_ADDRESS = "80:4B:50:D2:44:B4"

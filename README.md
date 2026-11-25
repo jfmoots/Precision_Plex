@@ -5,63 +5,11 @@ systems.
 
 ## Current release
 
-**v5.5.14 - Automatic Slide Endpoint Learning**
+**v5.5.20 - Motion Completion and LIN Recovery**
 
-- Automatically learns the live quadrature count after a successful full
-  extend or retract command, then persists the resulting 100% or 0% endpoint.
-- Prevents the next telemetry refresh from replacing a completed retract with
-  an intermediate percentage such as the Sofa Slide's observed 61%.
-- Keeps manual Reset Fully Retracted/Extended calibration available and leaves
-  Patio Awning behavior unchanged.
-
-**v5.5.13 - Persistent Slide Quadrature Calibration**
-
-- Makes each slide's Reset Fully Retracted button learn its live quadrature
-  zero and Reset Fully Extended learn its live full-travel count.
-- Persists the two learned endpoints in Home Assistant and calculates Bedroom,
-  Wardrobe, and Sofa positions between them.
-- Prevents the next quadrature refresh from erasing a manual endpoint reset.
-- Leaves Patio Awning behavior unchanged from v5.5.12.
-
-- Restores near-closed time estimates such as 7% as the synthetic 0% seated
-  endpoint after a Home Assistant restart.
-- Restores near-open time estimates such as the roughly 91% Carefree Flip
-  position as the synthetic 100% endpoint.
-- Persists ESPHome extend and retract endpoint events immediately, including
-  movement initiated from the wall panel.
-
-- Reports 100% after arm-lock detection, configured extend overrun, and the
-  complete configured Fabric Tighten retract sequence.
-- Holds that endpoint until authoritative PID32/02BB telemetry confirms both
-  motion directions idle.
-
-- Preserves the smart awning's synthetic 100% endpoint until controller-idle
-  telemetry confirms the Carefree Flip has completely finished.
-- Prevents trailing retract telemetry from overwriting 100% with the roughly
-  91% time-based physical estimate.
-
-- Ignores stale awning motion bits during startup until authoritative idle
-  telemetry is received.
-- Preserves immediate command response, wall-panel tracking after startup, and
-  the smart Carefree Flip sequence's synthetic 100% open endpoint.
-
-- Prefers a discovered ESPHome Precision Plex LIN bridge for telemetry.
-- Uses Bluetooth as a telemetry and control fallback.
-- Uses independent 30-second freshness grace periods for rotating LIN sources.
-- Keeps a four-second whole-bridge timeout for genuine communication loss.
-- Observes PID1F touchscreen and PID5E Wireless TP command intent immediately,
-  then reconciles it against authoritative PID32/02BB state.
-- Marshals every LIN telemetry/listener update onto Home Assistant's event loop
-  before changing coordinator state or updating entities.
-- Accepts compact firmware heartbeats without losing the last complete
-  telemetry snapshot.
-- Applies the same responsive state to covers, switches, lights, and their
-  matching movement/status binary sensors.
-- Disables high-churn BLE forensic entities by default and migrates existing
-  entries to the same quieter defaults.
-- Keeps raw packet bytes and transport counters out of ordinary entity
-  attributes while retaining them in Download diagnostics; live motor current
-  remains available from its dedicated ESPHome sensor.
+- Uses reported transport outcomes and encoder movement to protect learned slide endpoints.
+- Refreshes entities when the LIN heartbeat recovers after an outage.
+- Adds an ESPHome LIN bridge ID setting for installations with multiple coaches or bridges.
 
 ## Supported systems
 
@@ -83,6 +31,12 @@ Bluetooth fallback.
 The integration automatically discovers the co-located ESPHome LIN bridge and
 prefers fresh LIN values field by field. If a LIN field is unavailable, the
 integration falls back to Bluetooth where an equivalent value exists.
+
+Set **ESPHome LIN bridge ID** in the integration options to the bridge YAML's
+`lin_bridge_id` to bind the coach to that bridge. Configure an explicit binding
+when a second bridge or coach is connected to the same Home Assistant instance.
+Automatic binding works with a single coach and refuses to switch to another
+bridge after seeing a second bridge ID.
 
 With bridge firmware v0.6.6 and its native ESPHome actions configured, the patio
 awning, awning light, water heater, and water pump prefer LIN. The smart awning
