@@ -59,8 +59,13 @@ The integration releases its idle Bluetooth connection when the complete
 LIN command set is available. If the bridge or an action becomes unavailable,
 the integration reconnects to Bluetooth and logs the outage. It logs recovery
 and releases Bluetooth after any active Bluetooth command finishes. The
-`LIN Command Path Problem` diagnostic binary sensor can drive a dashboard
-alert without a notification automation.
+`LIN Command Path Problem` diagnostic binary sensor reports bridge selection,
+heartbeat, or bus-traffic problems. `LIN Generator Command Problem` reports
+persistent stale PIDBA generator feedback or a missing generator action.
+`LIN Output and Motion Command Problem` handles persistent stale PID32 feedback
+or missing output and motion actions. The two feedback diagnostics allow six
+seconds for short gaps and clear on recovery. Each command checks live availability
+before sending.
 
 Rotating PIDBA, PID32, PIDEC, and PID37 broadcasts retain their last valid state
 for 30 seconds while the bridge heartbeat remains healthy. If the event
